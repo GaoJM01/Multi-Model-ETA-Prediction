@@ -1,86 +1,420 @@
+#!/usr/bin/env python
 """
-Training and Evaluation script for ETA prediction using Informer-TP.
+ETA预测模型训练脚本
 
-This script:
-1. Loads and preprocesses AIS data
-2. Trains the Informer-TP model
-3. Evaluates performance on test set
-4. Plots prediction accuracy vs sailing days
+双模型架构：
+1. Informer-TP: 预测纯航行时间（使用预处理后的航程数据）
+2. MLP: 预测港口停靠时间
+
+最终ETA = 预测航行时间 + 预测停靠时间
+
+用法：
+    # 完整训练（包括停靠时间模型）
+    python train_eta.py --epochs 3 --train_port_model
+    
+    # 仅训练航程模型
+    python train_eta.py --epochs 3
+    
+    # 使用缓存的预处理数据
+    python train_eta.py --use_cache --epochs 5
 """
 
 import os
 import sys
 import argparse
 import numpy as np
+import pandas as pd
 import matplotlib
-matplotlib.use('Agg')  # Non-interactive backend
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from datetime import datetime
+from pathlib import Path
 from tqdm import tqdm
+import json
 
 import torch
 import torch.nn as nn
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import DataLoader, TensorDataset
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 
-# Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
-
 from src.informer.model import Informer
-from src.data_processor import ETADataProcessor, create_data_loaders
 
 
-class ETATrainer:
-    """Trainer for Informer ETA prediction model."""
+# ============================================================
+# Part 1: 港口停靠时间预测模型 (MLP)
+# ============================================================
+
+class PortStopPredictor(nn.Module):
+    """港口停靠时间预测MLP"""
     
-    def __init__(self, model: nn.Module, device: torch.device,
-                 learning_rate: float = 1e-4, weight_decay: float = 1e-5):
+    def __init__(self, input_dim: int, hidden_dims: list = [64, 32]):
+        super().__init__()
+        
+        layers = []
+        prev_dim = input_dim
+        
+        for hidden_dim in hidden_dims:
+            layers.extend([
+                nn.Linear(prev_dim, hidden_dim),
+                nn.ReLU(),
+                nn.BatchNorm1d(hidden_dim),
+                nn.Dropout(0.2)
+            ])
+            prev_dim = hidden_dim
+        
+        layers.append(nn.Linear(prev_dim, 1))
+        layers.append(nn.ReLU())
+        
+        self.network = nn.Sequential(*layers)
+    
+    def forward(self, x):
+        return self.network(x).squeeze(-1)
+
+
+class PortStopModel:
+    """港口停靠时间预测模型管理器"""
+    
+    def __init__(self, model_dir: str = './output/port_model'):
+        self.model_dir = Path(model_dir)
+        self.model_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.model = None
+        self.scaler = StandardScaler()
+        self.region_encoder = LabelEncoder()
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.region_classes = []
+    
+    def prepare_features(self, df: pd.DataFrame, fit: bool = False) -> np.ndarray:
+        """准备特征"""
+        features = df.copy()
+        
+        features['arrival_time'] = pd.to_datetime(features['arrival_time'])
+        features['month'] = features['arrival_time'].dt.month
+        features['weekday'] = features['arrival_time'].dt.weekday
+        
+        # 周期编码
+        features['month_sin'] = np.sin(2 * np.pi * features['month'] / 12)
+        features['month_cos'] = np.cos(2 * np.pi * features['month'] / 12)
+        features['weekday_sin'] = np.sin(2 * np.pi * features['weekday'] / 7)
+        features['weekday_cos'] = np.cos(2 * np.pi * features['weekday'] / 7)
+        
+        feature_cols = ['lon', 'lat', 'month_sin', 'month_cos', 'weekday_sin', 'weekday_cos']
+        
+        # 区域编码
+        if fit:
+            self.region_encoder.fit(features['region'])
+            self.region_classes = list(self.region_encoder.classes_)
+        
+        region_encoded = self.region_encoder.transform(features['region'])
+        num_regions = len(self.region_classes)
+        region_onehot = np.zeros((len(features), num_regions))
+        region_onehot[np.arange(len(features)), region_encoded] = 1
+        
+        numeric_features = features[feature_cols].values
+        all_features = np.hstack([numeric_features, region_onehot])
+        
+        if fit:
+            all_features = self.scaler.fit_transform(all_features)
+        else:
+            all_features = self.scaler.transform(all_features)
+        
+        return all_features
+    
+    def train(self, stop_df: pd.DataFrame, epochs: int = 100, batch_size: int = 32, lr: float = 0.001):
+        """训练模型"""
+        print(f"Training port stop predictor on {len(stop_df)} samples...")
+        
+        stop_df = stop_df[stop_df['duration_hours'] > 0].copy()
+        stop_df = stop_df[stop_df['duration_hours'] < 200]
+        
+        if len(stop_df) < 10:
+            print("Not enough data to train port model")
+            return None
+        
+        X = self.prepare_features(stop_df, fit=True)
+        y = np.log1p(stop_df['duration_hours'].values)
+        
+        # 划分
+        n = len(X)
+        indices = np.random.permutation(n)
+        train_size = int(n * 0.8)
+        train_idx, val_idx = indices[:train_size], indices[train_size:]
+        
+        X_train, y_train = X[train_idx], y[train_idx]
+        X_val, y_val = X[val_idx], y[val_idx]
+        
+        train_dataset = TensorDataset(torch.FloatTensor(X_train), torch.FloatTensor(y_train))
+        val_dataset = TensorDataset(torch.FloatTensor(X_val), torch.FloatTensor(y_val))
+        
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size)
+        
+        input_dim = X.shape[1]
+        self.model = PortStopPredictor(input_dim).to(self.device)
+        
+        optimizer = Adam(self.model.parameters(), lr=lr)
+        criterion = nn.HuberLoss()
+        
+        best_val_loss = float('inf')
+        
+        for epoch in range(epochs):
+            self.model.train()
+            for batch_x, batch_y in train_loader:
+                batch_x, batch_y = batch_x.to(self.device), batch_y.to(self.device)
+                optimizer.zero_grad()
+                loss = criterion(self.model(batch_x), batch_y)
+                loss.backward()
+                optimizer.step()
+            
+            self.model.eval()
+            val_loss = 0
+            with torch.no_grad():
+                for batch_x, batch_y in val_loader:
+                    batch_x, batch_y = batch_x.to(self.device), batch_y.to(self.device)
+                    val_loss += criterion(self.model(batch_x), batch_y).item()
+            val_loss /= len(val_loader)
+            
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                self.save()
+            
+            if (epoch + 1) % 20 == 0:
+                print(f"  Epoch {epoch+1}/{epochs}: Val Loss={val_loss:.4f}")
+        
+        # 最终评估
+        self.model.eval()
+        with torch.no_grad():
+            pred_log = self.model(torch.FloatTensor(X_val).to(self.device)).cpu().numpy()
+            pred_hours = np.expm1(pred_log)
+            actual_hours = np.expm1(y_val)
+            mae = np.mean(np.abs(pred_hours - actual_hours))
+        
+        print(f"  Port model MAE: {mae:.2f} hours")
+        return {'mae': mae}
+    
+    def predict(self, stop_df: pd.DataFrame) -> np.ndarray:
+        """预测停靠时间"""
+        if self.model is None:
+            self.load()
+        
+        X = self.prepare_features(stop_df, fit=False)
+        self.model.eval()
+        with torch.no_grad():
+            pred_log = self.model(torch.FloatTensor(X).to(self.device)).cpu().numpy()
+        return np.expm1(pred_log)
+    
+    def save(self):
+        if self.model is None:
+            return
+        torch.save(self.model.state_dict(), self.model_dir / 'model.pth')
+        np.save(self.model_dir / 'scaler_mean.npy', self.scaler.mean_)
+        np.save(self.model_dir / 'scaler_scale.npy', self.scaler.scale_)
+        config = {'region_classes': self.region_classes, 'input_dim': self.model.network[0].in_features}
+        with open(self.model_dir / 'config.json', 'w') as f:
+            json.dump(config, f)
+    
+    def load(self):
+        with open(self.model_dir / 'config.json', 'r') as f:
+            config = json.load(f)
+        self.region_classes = config['region_classes']
+        self.region_encoder.classes_ = np.array(self.region_classes)
+        self.scaler.mean_ = np.load(self.model_dir / 'scaler_mean.npy')
+        self.scaler.scale_ = np.load(self.model_dir / 'scaler_scale.npy')
+        self.model = PortStopPredictor(config['input_dim']).to(self.device)
+        self.model.load_state_dict(torch.load(self.model_dir / 'model.pth', map_location=self.device))
+
+
+# ============================================================
+# Part 2: 航程ETA数据处理
+# ============================================================
+
+class VoyageETADataset:
+    """航程数据处理器"""
+    
+    def __init__(self, seq_len: int = 48, label_len: int = 24, pred_len: int = 1):
+        self.seq_len = seq_len
+        self.label_len = label_len
+        self.pred_len = pred_len
+        
+        self.feature_min = None
+        self.feature_max = None
+        self.target_mean = None
+        self.target_std = None
+    
+    def normalize_features(self, features: np.ndarray, fit: bool = False) -> np.ndarray:
+        """Minmax归一化"""
+        if fit:
+            self.feature_min = features.min(axis=0)
+            self.feature_max = features.max(axis=0)
+        
+        range_vals = self.feature_max - self.feature_min
+        range_vals[range_vals == 0] = 1.0
+        return (features - self.feature_min) / range_vals
+    
+    def normalize_target(self, target: np.ndarray, fit: bool = False) -> np.ndarray:
+        """Log + 标准化"""
+        log_target = np.log1p(target)
+        if fit:
+            self.target_mean = log_target.mean()
+            self.target_std = log_target.std()
+        return (log_target - self.target_mean) / self.target_std
+    
+    def inverse_normalize_target(self, normalized: np.ndarray) -> np.ndarray:
+        """反归一化"""
+        log_target = normalized * self.target_std + self.target_mean
+        return np.expm1(log_target)
+    
+    def create_sequences(self, voyage_df: pd.DataFrame) -> tuple:
+        """从航程数据创建序列"""
+        feature_cols = ['lat', 'lon', 'sog', 'cog']
+        
+        all_X = []
+        all_X_mark = []
+        all_y = []
+        all_sailing_days = []
+        
+        for mmsi, group in voyage_df.groupby('mmsi'):
+            group = group.sort_values('postime')
+            
+            features = group[feature_cols].values
+            targets = group['remaining_hours'].values
+            postime = pd.to_datetime(group['postime'])
+            
+            first_time = postime.iloc[0]
+            sailing_days = (postime - first_time).dt.total_seconds() / 86400
+            
+            # 时间特征（5维）
+            time_marks = np.stack([
+                postime.dt.month.values / 12,
+                postime.dt.day.values / 31,
+                postime.dt.weekday.values / 7,
+                postime.dt.hour.values / 24,
+                postime.dt.minute.values / 60
+            ], axis=1)
+            
+            # 滑动窗口
+            for i in range(len(features) - self.seq_len - self.pred_len + 1):
+                X = features[i:i+self.seq_len]
+                X_mark_enc = time_marks[i:i+self.seq_len]
+                X_mark_dec = time_marks[i+self.seq_len-self.label_len:i+self.seq_len+self.pred_len]
+                y = targets[i+self.seq_len]
+                sd = sailing_days.iloc[i+self.seq_len]
+                
+                all_X.append(X)
+                all_X_mark.append((X_mark_enc, X_mark_dec))
+                all_y.append(y)
+                all_sailing_days.append(sd)
+        
+        X = np.array(all_X)
+        X_mark_enc = np.array([m[0] for m in all_X_mark])
+        X_mark_dec = np.array([m[1] for m in all_X_mark])
+        y = np.array(all_y)
+        sailing_days = np.array(all_sailing_days)
+        
+        # 归一化
+        X_flat = X.reshape(-1, X.shape[-1])
+        X_norm = self.normalize_features(X_flat, fit=True).reshape(X.shape)
+        y_norm = self.normalize_target(y, fit=True)
+        
+        return X_norm, X_mark_enc, X_mark_dec, y_norm, sailing_days
+    
+    def save_params(self, path: str):
+        """保存归一化参数"""
+        np.savez(path,
+                 feature_min=self.feature_min,
+                 feature_max=self.feature_max,
+                 target_mean=self.target_mean,
+                 target_std=self.target_std)
+    
+    def load_params(self, path: str):
+        """加载归一化参数"""
+        data = np.load(path)
+        self.feature_min = data['feature_min']
+        self.feature_max = data['feature_max']
+        self.target_mean = data['target_mean']
+        self.target_std = data['target_std']
+
+
+def create_data_loaders(X, X_mark_enc, X_mark_dec, y, sailing_days, label_len, pred_len, batch_size=32):
+    """创建数据加载器"""
+    n = len(X)
+    indices = np.random.permutation(n)
+    
+    train_size = int(n * 0.7)
+    val_size = int(n * 0.15)
+    
+    train_idx = indices[:train_size]
+    val_idx = indices[train_size:train_size+val_size]
+    test_idx = indices[train_size+val_size:]
+    
+    dec_len = label_len + pred_len
+    
+    def make_loader(idx, shuffle=True):
+        X_batch = torch.FloatTensor(X[idx])
+        X_mark_enc_batch = torch.FloatTensor(X_mark_enc[idx])
+        X_mark_dec_batch = torch.FloatTensor(X_mark_dec[idx])
+        y_batch = torch.FloatTensor(y[idx])
+        sd_batch = torch.FloatTensor(sailing_days[idx])
+        
+        X_dec = torch.zeros(len(idx), dec_len, X.shape[-1])
+        X_dec[:, :label_len, :] = X_batch[:, -label_len:, :]
+        
+        dataset = TensorDataset(X_batch, X_mark_enc_batch, X_dec, X_mark_dec_batch, y_batch, sd_batch)
+        return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
+    
+    return (make_loader(train_idx, True), make_loader(val_idx, False), make_loader(test_idx, False),
+            sailing_days[test_idx], y[test_idx], test_idx)
+
+
+# ============================================================
+# Part 3: Informer训练器
+# ============================================================
+
+class InformerTrainer:
+    """Informer模型训练器"""
+    
+    def __init__(self, model, device, lr=5e-6):
         self.model = model.to(device)
         self.device = device
-        # Use Huber Loss (Smooth L1) - less sensitive to outliers than MSE
         self.criterion = nn.HuberLoss(delta=1.0)
-        self.optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        self.optimizer = Adam(model.parameters(), lr=lr, weight_decay=1e-5)
         self.scheduler = ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=3)
-        
-    def train_epoch(self, train_loader) -> float:
-        """Train for one epoch."""
+    
+    def train_epoch(self, loader):
         self.model.train()
         total_loss = 0
         
-        for batch in tqdm(train_loader, desc="Training"):
+        for batch in tqdm(loader, desc="Training", leave=False):
             x_enc, x_mark_enc, x_dec, x_mark_dec, y, _ = batch
             
-            # Move to device
             x_enc = x_enc.to(self.device)
             x_mark_enc = x_mark_enc.to(self.device)
             x_dec = x_dec.to(self.device)
             x_mark_dec = x_mark_dec.to(self.device)
             y = y.to(self.device)
             
-            # Forward pass
             self.optimizer.zero_grad()
             output = self.model(x_enc, x_mark_enc, x_dec, x_mark_dec)
+            output = output.squeeze(-1).squeeze(-1)
             
-            # Loss on prediction (squeeze output to match target shape)
-            output = output.squeeze(-1).squeeze(-1)  # (batch,)
             loss = self.criterion(output, y)
-            
-            # Backward pass
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
             
             total_loss += loss.item()
-            
-        return total_loss / len(train_loader)
+        
+        return total_loss / len(loader)
     
-    def validate(self, val_loader) -> float:
-        """Validate the model."""
+    def validate(self, loader):
         self.model.eval()
         total_loss = 0
         
         with torch.no_grad():
-            for batch in val_loader:
+            for batch in loader:
                 x_enc, x_mark_enc, x_dec, x_mark_dec, y, _ = batch
                 
                 x_enc = x_enc.to(self.device)
@@ -92,21 +426,17 @@ class ETATrainer:
                 output = self.model(x_enc, x_mark_enc, x_dec, x_mark_dec)
                 output = output.squeeze(-1).squeeze(-1)
                 loss = self.criterion(output, y)
-                
                 total_loss += loss.item()
-                
-        return total_loss / len(val_loader)
+        
+        return total_loss / len(loader)
     
-    def predict(self, test_loader) -> tuple:
-        """Make predictions on test set."""
+    def predict(self, loader):
         self.model.eval()
-        predictions = []
-        targets = []
-        sailing_days_list = []
+        preds, trues, sailing_days_list = [], [], []
         
         with torch.no_grad():
-            for batch in test_loader:
-                x_enc, x_mark_enc, x_dec, x_mark_dec, y, sailing_days = batch
+            for batch in loader:
+                x_enc, x_mark_enc, x_dec, x_mark_dec, y, sd = batch
                 
                 x_enc = x_enc.to(self.device)
                 x_mark_enc = x_mark_enc.to(self.device)
@@ -116,328 +446,270 @@ class ETATrainer:
                 output = self.model(x_enc, x_mark_enc, x_dec, x_mark_dec)
                 output = output.squeeze(-1).squeeze(-1)
                 
-                predictions.extend(output.cpu().numpy())
-                targets.extend(y.numpy())
-                sailing_days_list.extend(sailing_days.numpy())
-                
-        return (np.array(predictions), np.array(targets), np.array(sailing_days_list))
-    
-    def save_model(self, path: str):
-        """Save model checkpoint."""
-        torch.save({
-            'model_state_dict': self.model.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-        }, path)
+                preds.append(output.cpu().numpy())
+                trues.append(y.numpy())
+                sailing_days_list.append(sd.numpy())
         
-    def load_model(self, path: str):
-        """Load model checkpoint."""
-        checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
+        return np.concatenate(preds), np.concatenate(trues), np.concatenate(sailing_days_list)
+    
+    def save(self, path):
+        torch.save(self.model.state_dict(), path)
+    
+    def load(self, path):
+        self.model.load_state_dict(torch.load(path, map_location=self.device))
 
 
-def calculate_metrics(y_pred: np.ndarray, y_true: np.ndarray) -> dict:
-    """Calculate evaluation metrics."""
-    # MSE
+# ============================================================
+# Part 4: 评估和可视化
+# ============================================================
+
+def calculate_metrics(y_pred, y_true):
+    """计算评估指标"""
     mse = np.mean((y_pred - y_true) ** 2)
-    
-    # MAE
     mae = np.mean(np.abs(y_pred - y_true))
-    
-    # RMSE
     rmse = np.sqrt(mse)
     
-    # MAPE (avoid division by zero, only for y_true > 24 hours)
-    mask = y_true > 24  # Only calculate MAPE for remaining time > 1 day
-    if np.sum(mask) > 0:
-        mape = np.mean(np.abs((y_pred[mask] - y_true[mask]) / y_true[mask])) * 100
-    else:
-        mape = float('nan')
+    mask = y_true > 24
+    mape = np.mean(np.abs((y_pred[mask] - y_true[mask]) / y_true[mask])) * 100 if mask.sum() > 0 else 0
     
-    # MAE in days for readability
-    mae_days = mae / 24
-    
-    return {
-        'MSE': mse,
-        'MAE_hours': mae,
-        'MAE_days': mae_days,
-        'RMSE': rmse,
-        'MAPE (y>24h)': mape
-    }
+    return {'MSE': mse, 'MAE_hours': mae, 'MAE_days': mae / 24, 'RMSE': rmse, 'MAPE': mape}
 
 
-def plot_accuracy_vs_sailing_days(y_pred: np.ndarray, y_true: np.ndarray, 
-                                   sailing_days: np.ndarray, save_path: str = None):
-    """
-    Plot prediction accuracy vs sailing days.
+def plot_results(y_pred, y_true, sailing_days, save_dir):
+    """绘制结果图表"""
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     
-    Groups predictions by sailing days and calculates MAE for each group.
-    """
-    plt.figure(figsize=(12, 8))
+    # 1. 误差vs航行天数
+    ax = axes[0, 0]
+    scatter = ax.scatter(sailing_days, np.abs(y_pred - y_true), c=y_true, cmap='viridis', alpha=0.5, s=10)
+    ax.set_xlabel('Sailing Days')
+    ax.set_ylabel('Absolute Error (hours)')
+    ax.set_title('Prediction Error vs Sailing Days')
+    plt.colorbar(scatter, ax=ax, label='True Remaining Hours')
     
-    # Calculate absolute errors
-    errors = np.abs(y_pred - y_true)
-    
-    # Create bins for sailing days
-    max_days = min(sailing_days.max(), 30)  # Cap at 30 days
-    bins = np.arange(0, max_days + 1, 1)  # 1-day bins
-    bin_indices = np.digitize(sailing_days, bins) - 1
-    
-    # Calculate metrics for each bin
-    bin_maes = []
-    bin_centers = []
-    bin_counts = []
-    
-    for i in range(len(bins) - 1):
+    # 2. 分箱MAE
+    ax = axes[0, 1]
+    bins = np.arange(0, sailing_days.max() + 1, 1)
+    bin_indices = np.digitize(sailing_days, bins)
+    bin_maes, bin_centers = [], []
+    for i in range(1, len(bins)):
         mask = bin_indices == i
-        if np.sum(mask) > 10:  # Minimum samples per bin
-            bin_mae = np.mean(errors[mask])
-            bin_maes.append(bin_mae)
-            bin_centers.append((bins[i] + bins[i+1]) / 2)
-            bin_counts.append(np.sum(mask))
+        if mask.sum() > 10:
+            bin_maes.append(np.mean(np.abs(y_pred[mask] - y_true[mask])))
+            bin_centers.append((bins[i-1] + bins[i]) / 2)
+    ax.bar(bin_centers, bin_maes, width=0.8, alpha=0.7, color='steelblue')
+    ax.set_xlabel('Sailing Days')
+    ax.set_ylabel('MAE (hours)')
+    ax.set_title('MAE by Sailing Days')
+    ax.grid(True, alpha=0.3)
     
-    # Plot 1: MAE vs Sailing Days
-    plt.subplot(2, 2, 1)
-    plt.bar(bin_centers, bin_maes, width=0.8, color='steelblue', alpha=0.7)
-    plt.xlabel('Sailing Days', fontsize=12)
-    plt.ylabel('Mean Absolute Error (hours)', fontsize=12)
-    plt.title('Prediction Error vs Sailing Days', fontsize=14)
-    plt.grid(True, alpha=0.3)
+    # 3. 预测vs实际
+    ax = axes[1, 0]
+    ax.scatter(y_true, y_pred, alpha=0.3, s=10)
+    max_val = max(y_true.max(), y_pred.max())
+    ax.plot([0, max_val], [0, max_val], 'r--', label='Perfect')
+    ax.set_xlabel('Actual Hours')
+    ax.set_ylabel('Predicted Hours')
+    ax.set_title('Predicted vs Actual')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
     
-    # Plot 2: MAPE vs Sailing Days
-    plt.subplot(2, 2, 2)
-    bin_mapes = []
-    for i in range(len(bins) - 1):
-        mask = (bin_indices == i) & (y_true > 0)
-        if np.sum(mask) > 10:
-            bin_mape = np.mean(np.abs((y_pred[mask] - y_true[mask]) / y_true[mask])) * 100
-            bin_mapes.append(bin_mape)
-    
-    if bin_mapes:
-        plt.bar(bin_centers[:len(bin_mapes)], bin_mapes, width=0.8, color='coral', alpha=0.7)
-        plt.xlabel('Sailing Days', fontsize=12)
-        plt.ylabel('MAPE (%)', fontsize=12)
-        plt.title('Percentage Error vs Sailing Days', fontsize=14)
-        plt.grid(True, alpha=0.3)
-    
-    # Plot 3: Scatter plot of predictions vs actual
-    plt.subplot(2, 2, 3)
-    sample_idx = np.random.choice(len(y_pred), min(1000, len(y_pred)), replace=False)
-    plt.scatter(y_true[sample_idx], y_pred[sample_idx], alpha=0.3, s=10)
-    max_val = max(y_true[sample_idx].max(), y_pred[sample_idx].max())
-    plt.plot([0, max_val], [0, max_val], 'r--', label='Perfect Prediction')
-    plt.xlabel('Actual Remaining Time (hours)', fontsize=12)
-    plt.ylabel('Predicted Remaining Time (hours)', fontsize=12)
-    plt.title('Predicted vs Actual ETA', fontsize=14)
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 4: Sample count per bin
-    plt.subplot(2, 2, 4)
-    plt.bar(bin_centers, bin_counts, width=0.8, color='green', alpha=0.7)
-    plt.xlabel('Sailing Days', fontsize=12)
-    plt.ylabel('Sample Count', fontsize=12)
-    plt.title('Data Distribution by Sailing Days', fontsize=14)
-    plt.grid(True, alpha=0.3)
+    # 4. 误差分布
+    ax = axes[1, 1]
+    errors = y_pred - y_true
+    ax.hist(errors, bins=50, alpha=0.7, color='steelblue', edgecolor='black')
+    ax.axvline(x=0, color='red', linestyle='--')
+    ax.axvline(x=np.mean(errors), color='orange', linestyle='-', label=f'Mean: {np.mean(errors):.1f}h')
+    ax.set_xlabel('Prediction Error (hours)')
+    ax.set_ylabel('Count')
+    ax.set_title('Error Distribution')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    
-    if save_path:
-        plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        print(f"Plot saved to {save_path}")
-    
-    plt.close()  # Close figure instead of show
-    
-    return bin_centers, bin_maes
+    plt.savefig(os.path.join(save_dir, 'analysis_plots.png'), dpi=150)
+    plt.close()
+    print(f"Plots saved to {save_dir}")
 
+
+# ============================================================
+# Part 5: 主函数
+# ============================================================
 
 def main():
-    parser = argparse.ArgumentParser(description='Train Informer-TP for ETA Prediction')
-    parser.add_argument('--data_dir', type=str, default='./data', help='Data directory')
-    parser.add_argument('--seq_len', type=int, default=48, help='Input sequence length')
-    parser.add_argument('--label_len', type=int, default=24, help='Start token length')
-    parser.add_argument('--pred_len', type=int, default=1, help='Prediction length')
-    parser.add_argument('--d_model', type=int, default=512, help='Model dimension')
-    parser.add_argument('--n_heads', type=int, default=8, help='Number of attention heads')
-    parser.add_argument('--e_layers', type=int, default=2, help='Encoder layers')
-    parser.add_argument('--d_layers', type=int, default=1, help='Decoder layers')
-    parser.add_argument('--d_ff', type=int, default=2048, help='Feedforward dimension')
-    parser.add_argument('--dropout', type=float, default=0.05, help='Dropout rate')
-    parser.add_argument('--batch_size', type=int, default=32, help='Batch size')
-    parser.add_argument('--epochs', type=int, default=50, help='Number of epochs')
-    parser.add_argument('--lr', type=float, default=5e-6, help='Learning rate (paper uses 5e-6)')
-    parser.add_argument('--output_dir', type=str, default='./output', help='Output directory')
-    parser.add_argument('--max_files', type=int, default=None, help='Maximum files to process (for testing)')
-    parser.add_argument('--use_cache', action='store_true', help='Use cached preprocessed data')
-    parser.add_argument('--cache_dir', type=str, default='./output/cache', help='Cache directory for preprocessed data')
-    parser.add_argument('--norm_type', type=str, default='minmax', choices=['standard', 'minmax'], help='Normalization type (paper uses minmax)')
+    parser = argparse.ArgumentParser(description='ETA预测模型训练')
+    
+    # 数据路径
+    parser.add_argument('--data_dir', type=str, default='./data')
+    parser.add_argument('--output_dir', type=str, default='./output')
+    parser.add_argument('--processed_dir', type=str, default='./output/processed')
+    
+    # 模型参数
+    parser.add_argument('--seq_len', type=int, default=48)
+    parser.add_argument('--label_len', type=int, default=24)
+    parser.add_argument('--pred_len', type=int, default=1)
+    parser.add_argument('--d_model', type=int, default=512)
+    parser.add_argument('--n_heads', type=int, default=8)
+    parser.add_argument('--e_layers', type=int, default=2)
+    parser.add_argument('--d_layers', type=int, default=1)
+    parser.add_argument('--d_ff', type=int, default=2048)
+    parser.add_argument('--dropout', type=float, default=0.05)
+    
+    # 训练参数
+    parser.add_argument('--batch_size', type=int, default=32)
+    parser.add_argument('--epochs', type=int, default=3)
+    parser.add_argument('--lr', type=float, default=5e-6)
+    
+    # 港口模型
+    parser.add_argument('--train_port_model', action='store_true', help='训练港口停靠时间模型')
+    parser.add_argument('--port_epochs', type=int, default=100)
+    
+    # 其他
+    parser.add_argument('--use_cache', action='store_true', help='使用缓存的预处理数据')
+    parser.add_argument('--max_files', type=int, default=None, help='处理文件数限制')
     
     args = parser.parse_args()
     
-    # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(args.processed_dir, exist_ok=True)
     
-    # Device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
-    # Load and preprocess data
-    print("\n=== Loading Data ===")
-    processor = ETADataProcessor(
-        data_dir=args.data_dir,
-        seq_len=args.seq_len,
-        label_len=args.label_len,
-        pred_len=args.pred_len,
-        norm_type=args.norm_type
+    # ===== Step 1: 加载数据 =====
+    print("\n" + "="*60)
+    print("Step 1: 加载数据")
+    print("="*60)
+    
+    voyage_path = os.path.join(args.processed_dir, 'processed_voyages.csv')
+    stop_path = os.path.join(args.processed_dir, 'port_stops.csv')
+    
+    if not os.path.exists(voyage_path):
+        print("预处理数据不存在，请先运行: python preprocess_data.py")
+        return
+    
+    voyage_df = pd.read_csv(voyage_path)
+    stop_df = pd.read_csv(stop_path) if os.path.exists(stop_path) else pd.DataFrame()
+    
+    print(f"航程数据: {len(voyage_df):,} 条")
+    print(f"停靠数据: {len(stop_df):,} 条")
+    
+    # ===== Step 2: 训练港口停靠模型（可选）=====
+    if args.train_port_model and len(stop_df) > 10:
+        print("\n" + "="*60)
+        print("Step 2: 训练港口停靠时间预测模型")
+        print("="*60)
+        
+        port_model = PortStopModel(os.path.join(args.output_dir, 'port_model'))
+        port_model.train(stop_df, epochs=args.port_epochs)
+        
+        print("\n各区域平均停靠时间（baseline）:")
+        for region, avg in stop_df.groupby('region')['duration_hours'].mean().items():
+            print(f"  {region}: {avg:.2f} 小时")
+    
+    # ===== Step 3: 准备训练数据 =====
+    print("\n" + "="*60)
+    print("Step 3: 准备训练数据")
+    print("="*60)
+    
+    # 过滤数据
+    training_df = voyage_df[['lat', 'lon', 'sog', 'cog', 'remaining_hours', 'mmsi', 'postime']].copy()
+    training_df = training_df.dropna()
+    training_df = training_df[(training_df['remaining_hours'] >= 0) & (training_df['remaining_hours'] <= 720)]
+    training_df = training_df[(training_df['sog'] >= 0) & (training_df['sog'] <= 30)]
+    
+    print(f"过滤后数据: {len(training_df):,} 条")
+    
+    if len(training_df) < 1000:
+        print("数据量不足，请先处理更多文件")
+        return
+    
+    dataset = VoyageETADataset(seq_len=args.seq_len, label_len=args.label_len, pred_len=args.pred_len)
+    X, X_mark_enc, X_mark_dec, y, sailing_days = dataset.create_sequences(training_df)
+    
+    print(f"序列数量: {len(X):,}")
+    print(f"序列形状: X={X.shape}, y={y.shape}")
+    
+    # 保存归一化参数
+    dataset.save_params(os.path.join(args.output_dir, 'norm_params.npz'))
+    
+    train_loader, val_loader, test_loader, test_sd, test_y, test_idx = create_data_loaders(
+        X, X_mark_enc, X_mark_dec, y, sailing_days,
+        label_len=args.label_len, pred_len=args.pred_len, batch_size=args.batch_size
     )
     
-    # Check for cached data or process in batches
-    cache_exists = (
-        os.path.exists(os.path.join(args.cache_dir, 'metadata.pkl')) or  # memmap format
-        os.path.exists(os.path.join(args.cache_dir, 'X.npy'))  # npy format
-    )
+    print(f"训练集: {len(train_loader.dataset):,}, 验证集: {len(val_loader.dataset):,}, 测试集: {len(test_loader.dataset):,}")
     
-    if args.use_cache and cache_exists:
-        print("Loading cached data...")
-        X, X_mark, y, sailing_days = processor.load_processed_data(args.cache_dir)
-    else:
-        print("Processing data in batches (memory-efficient mode)...")
-        X, X_mark, y, sailing_days = processor.prepare_data_batched(
-            max_files=args.max_files,
-            save_dir=args.cache_dir
-        )
+    # ===== Step 4: 训练Informer =====
+    print("\n" + "="*60)
+    print("Step 4: 训练Informer模型")
+    print("="*60)
     
-    print(f"Data shape: X={X.shape}, y={y.shape}")
-    
-    # Create data loaders
-    print("\n=== Creating Data Loaders ===")
-    train_loader, val_loader, test_loader, test_sailing_days, test_y, test_idx = create_data_loaders(
-        X, X_mark, y, sailing_days,
-        label_len=args.label_len,
-        pred_len=args.pred_len,
-        batch_size=args.batch_size
-    )
-    print(f"Train: {len(train_loader.dataset)}, Val: {len(val_loader.dataset)}, Test: {len(test_loader.dataset)}")
-    
-    # Create model
-    print("\n=== Creating Informer Model ===")
     model = Informer(
-        enc_in=4,  # lat, lon, sog, cog
-        dec_in=4,
-        c_out=1,   # ETA (remaining time)
-        seq_len=args.seq_len,
-        label_len=args.label_len,
-        pred_len=args.pred_len,
-        d_model=args.d_model,
-        n_heads=args.n_heads,
-        e_layers=args.e_layers,
-        d_layers=args.d_layers,
-        d_ff=args.d_ff,
-        dropout=args.dropout,
-        attn='prob',
-        embed='timeF',
-        activation='gelu',
-        output_attention=False,
-        distil=True,
-        device=device
+        enc_in=4, dec_in=4, c_out=1,
+        seq_len=args.seq_len, label_len=args.label_len, pred_len=args.pred_len,
+        d_model=args.d_model, n_heads=args.n_heads,
+        e_layers=args.e_layers, d_layers=args.d_layers,
+        d_ff=args.d_ff, dropout=args.dropout,
+        attn='prob', embed='timeF', activation='gelu',
+        output_attention=False, distil=True, device=device
     )
     
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Total parameters: {total_params:,}")
-    print(f"Trainable parameters: {trainable_params:,}")
+    print(f"模型参数量: {sum(p.numel() for p in model.parameters()):,}")
     
-    # Create trainer
-    trainer = ETATrainer(model, device, learning_rate=args.lr)
+    trainer = InformerTrainer(model, device, lr=args.lr)
     
-    # Training loop
-    print("\n=== Training ===")
     best_val_loss = float('inf')
-    train_losses = []
-    val_losses = []
-    
     for epoch in range(args.epochs):
         train_loss = trainer.train_epoch(train_loader)
         val_loss = trainer.validate(val_loader)
-        
-        train_losses.append(train_loss)
-        val_losses.append(val_loss)
-        
-        # Update learning rate
         trainer.scheduler.step(val_loss)
-        current_lr = trainer.optimizer.param_groups[0]['lr']
         
-        print(f"Epoch {epoch+1}/{args.epochs}: Train Loss={train_loss:.4f}, Val Loss={val_loss:.4f}, LR={current_lr:.2e}")
+        lr = trainer.optimizer.param_groups[0]['lr']
+        print(f"Epoch {epoch+1}/{args.epochs}: Train={train_loss:.4f}, Val={val_loss:.4f}, LR={lr:.2e}")
         
-        # Save best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            trainer.save_model(os.path.join(args.output_dir, 'best_model.pth'))
-            print("  -> Best model saved!")
+            trainer.save(os.path.join(args.output_dir, 'best_informer.pth'))
+            print("  -> 保存最佳模型!")
     
-    # Load best model for evaluation
-    trainer.load_model(os.path.join(args.output_dir, 'best_model.pth'))
+    trainer.load(os.path.join(args.output_dir, 'best_informer.pth'))
     
-    # Evaluate on test set
-    print("\n=== Evaluation ===")
-    y_pred_norm, y_true_norm, pred_sailing_days = trainer.predict(test_loader)
+    # ===== Step 5: 评估 =====
+    print("\n" + "="*60)
+    print("Step 5: 评估")
+    print("="*60)
     
-    # Inverse transform predictions and targets to original scale
-    y_pred = processor.inverse_normalize_target(y_pred_norm)
-    y_true = processor.inverse_normalize_target(y_true_norm)
+    y_pred_norm, y_true_norm, pred_sd = trainer.predict(test_loader)
     
-    print(f"Predictions range: [{y_pred.min():.2f}, {y_pred.max():.2f}] hours")
-    print(f"Actual range: [{y_true.min():.2f}, {y_true.max():.2f}] hours")
+    y_pred = dataset.inverse_normalize_target(y_pred_norm)
+    y_true = dataset.inverse_normalize_target(y_true_norm)
+    y_pred = np.maximum(y_pred, 0)
     
-    # Calculate metrics (in original scale - hours)
+    print(f"预测范围: [{y_pred.min():.2f}, {y_pred.max():.2f}] 小时")
+    print(f"实际范围: [{y_true.min():.2f}, {y_true.max():.2f}] 小时")
+    
     metrics = calculate_metrics(y_pred, y_true)
-    print("\nTest Metrics (hours):")
+    print("\n【航程预测指标】")
     for name, value in metrics.items():
         print(f"  {name}: {value:.4f}")
     
-    # Save metrics
+    # 保存结果
     with open(os.path.join(args.output_dir, 'metrics.txt'), 'w') as f:
-        f.write(f"Training completed: {datetime.now().isoformat()}\n\n")
-        f.write("Model Configuration:\n")
-        for key, value in vars(args).items():
-            f.write(f"  {key}: {value}\n")
-        f.write("\nTest Metrics:\n")
+        f.write(f"训练时间: {datetime.now().isoformat()}\n\n")
+        f.write("配置:\n")
+        for k, v in vars(args).items():
+            f.write(f"  {k}: {v}\n")
+        f.write("\n航程ETA指标:\n")
         for name, value in metrics.items():
             f.write(f"  {name}: {value:.4f}\n")
     
-    # Plot training curves
-    plt.figure(figsize=(10, 4))
-    plt.subplot(1, 2, 1)
-    plt.plot(train_losses, label='Train')
-    plt.plot(val_losses, label='Validation')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Training and Validation Loss')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
+    plot_results(y_pred, y_true, pred_sd, args.output_dir)
     
-    plt.subplot(1, 2, 2)
-    plt.plot(train_losses, label='Train')
-    plt.plot(val_losses, label='Validation')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss (log scale)')
-    plt.yscale('log')
-    plt.title('Training Loss (Log Scale)')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig(os.path.join(args.output_dir, 'training_curves.png'), dpi=150)
-    plt.close()  # Close figure instead of show
-    
-    # Plot accuracy vs sailing days
-    print("\n=== Plotting Results ===")
-    plot_accuracy_vs_sailing_days(
-        y_pred, y_true, pred_sailing_days,
-        save_path=os.path.join(args.output_dir, 'accuracy_vs_sailing_days.png')
-    )
-    
-    print(f"\nTraining complete! Results saved to {args.output_dir}")
+    print(f"\n训练完成! 结果保存至 {args.output_dir}")
+    print("\n【最终ETA计算方式】")
+    print("  最终ETA = Informer预测的航行时间 + 港口停靠时间模型预测的停靠时间")
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
