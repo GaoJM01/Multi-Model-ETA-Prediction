@@ -55,22 +55,27 @@ class PortStop:
 class VoyageExtractor:
     """从AIS数据中提取航程信息"""
     
-    # 速度阈值：低于此值视为停靠（节）
-    STOP_SPEED_THRESHOLD = 0.5
+    # 速度阈值：低于此值视为停靠（节）- 降低阈值更严格判定停靠
+    STOP_SPEED_THRESHOLD = 0.3
     
     # 最小航段时长（小时）
     MIN_SEGMENT_HOURS = 6
     
-    # 最小停靠时长（小时）
-    MIN_STOP_HOURS = 1
+    # 最小停靠时长（小时）- 增加到2小时避免误判
+    MIN_STOP_HOURS = 2
+    
+    # 最小数据密度（点/天）
+    MIN_POINTS_PER_DAY = 10
     
     def __init__(self, 
-                 stop_speed_threshold: float = 0.5,
+                 stop_speed_threshold: float = 0.3,
                  min_segment_hours: float = 6,
-                 min_stop_hours: float = 1):
+                 min_stop_hours: float = 2,
+                 min_points_per_day: float = 10):
         self.stop_speed_threshold = stop_speed_threshold
         self.min_segment_hours = min_segment_hours
         self.min_stop_hours = min_stop_hours
+        self.min_points_per_day = min_points_per_day
     
     def classify_region(self, lon: float, lat: float) -> str:
         """根据经纬度判断区域"""
@@ -93,11 +98,19 @@ class VoyageExtractor:
     
     def extract_segments(self, df: pd.DataFrame) -> Tuple[List[VoyageSegment], List[PortStop]]:
         """从船舶数据中提取航段和停靠信息"""
-        if len(df) == 0:
+        if len(df) < 10:
             return [], []
         
         df = df.sort_values('postime').copy()
         df['postime'] = pd.to_datetime(df['postime'])
+        
+        # 检查数据密度
+        time_span_days = (df['postime'].max() - df['postime'].min()).total_seconds() / 86400
+        if time_span_days > 0:
+            points_per_day = len(df) / time_span_days
+            if points_per_day < self.min_points_per_day:
+                # 数据太稀疏，跳过
+                return [], []
         
         # 标记停靠状态
         df['is_stopped'] = df['sog'] < self.stop_speed_threshold
@@ -282,6 +295,8 @@ class DataProcessor:
             print(f"Saved voyage data: {len(voyage_df)} records -> {voyage_path}")
         
         if len(stop_df) > 0:
+            # 过滤异常停靠时间（超过7天=168小时的可能是数据问题）
+            stop_df = stop_df[(stop_df['duration_hours'] >= 1) & (stop_df['duration_hours'] <= 168)]
             stop_path = self.output_dir / 'port_stops.csv'
             stop_df.to_csv(stop_path, index=False)
             print(f"Saved stop data: {len(stop_df)} records -> {stop_path}")
@@ -317,11 +332,72 @@ def print_summary(voyage_df: pd.DataFrame, stop_df: pd.DataFrame):
             print(f"    {region}: 平均 {row['mean']:.1f} 小时, {int(row['count'])} 次")
 
 
+def filter_data_quality(voyage_df: pd.DataFrame, stop_df: pd.DataFrame, 
+                        min_points: int = 50, 
+                        min_points_per_day: float = 10.0,
+                        max_stop_hours: float = 168.0,
+                        min_stop_hours: float = 4.0) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """数据质量过滤"""
+    print("\n数据质量过滤...")
+    
+    original_voyages = len(voyage_df)
+    original_ships = voyage_df['mmsi'].nunique() if len(voyage_df) > 0 else 0
+    
+    # 过滤航程数据
+    valid_ships = []
+    if len(voyage_df) > 0:
+        # 计算每艘船的数据密度
+        ship_stats = []
+        for mmsi, group in voyage_df.groupby('mmsi'):
+            n_points = len(group)
+            duration_hours = group['voyage_duration_hours'].iloc[0]
+            duration_days = duration_hours / 24
+            points_per_day = n_points / duration_days if duration_days > 0 else 0
+            ship_stats.append({
+                'mmsi': mmsi,
+                'n_points': n_points,
+                'duration_days': duration_days,
+                'points_per_day': points_per_day
+            })
+        
+        stats_df = pd.DataFrame(ship_stats)
+        
+        # 过滤条件：数据点>=50 且 每天至少10个点
+        valid_ships = stats_df[
+            (stats_df['n_points'] >= min_points) & 
+            (stats_df['points_per_day'] >= min_points_per_day)
+        ]['mmsi'].tolist()
+        
+        # 打印被过滤掉的船
+        filtered_ships = stats_df[~stats_df['mmsi'].isin(valid_ships)]
+        if len(filtered_ships) > 0:
+            print(f"  过滤掉 {len(filtered_ships)} 艘数据稀疏的船:")
+            for _, row in filtered_ships.iterrows():
+                print(f"    {row['mmsi']}: {row['n_points']:.0f}点, {row['duration_days']:.1f}天, {row['points_per_day']:.1f}点/天")
+        
+        voyage_df = voyage_df[voyage_df['mmsi'].isin(valid_ships)].copy()
+    
+    # 过滤停靠数据
+    if len(stop_df) > 0:
+        original_stops = len(stop_df)
+        # 1. 只保留有效船舶的停靠数据
+        stop_df = stop_df[stop_df['mmsi'].isin(valid_ships)].copy()
+        # 2. 过滤异常停靠时间（太短或太长）
+        stop_df = stop_df[(stop_df['duration_hours'] >= min_stop_hours) & (stop_df['duration_hours'] <= max_stop_hours)].copy()
+        print(f"  停靠数据: {original_stops} -> {len(stop_df)} (过滤无效船舶和异常停靠时间)")
+    
+    print(f"  航程数据: {original_voyages} -> {len(voyage_df)} ({original_ships} -> {voyage_df['mmsi'].nunique()} 艘船)")
+    
+    return voyage_df, stop_df
+
+
 def main():
     parser = argparse.ArgumentParser(description='AIS数据预处理')
     parser.add_argument('--data_dir', type=str, default='./data', help='原始数据目录')
     parser.add_argument('--output_dir', type=str, default='./output/processed', help='输出目录')
     parser.add_argument('--max_files', type=int, default=None, help='最多处理文件数（用于测试）')
+    parser.add_argument('--min_points', type=int, default=50, help='每艘船最少数据点数')
+    parser.add_argument('--min_points_per_day', type=float, default=10.0, help='每天最少数据点数')
     
     args = parser.parse_args()
     
@@ -336,6 +412,17 @@ def main():
     
     if len(voyage_df) == 0:
         print("\n警告: 未提取到有效航程数据!")
+        return
+    
+    # 数据质量过滤
+    voyage_df, stop_df = filter_data_quality(
+        voyage_df, stop_df,
+        min_points=args.min_points,
+        min_points_per_day=args.min_points_per_day
+    )
+    
+    if len(voyage_df) == 0:
+        print("\n警告: 过滤后无有效数据!")
         return
     
     processor.save(voyage_df, stop_df)
