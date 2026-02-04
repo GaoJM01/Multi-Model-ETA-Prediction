@@ -21,6 +21,7 @@ ETA预测模型训练脚本
 
 import os
 import sys
+import gc
 import argparse
 import numpy as np
 import pandas as pd
@@ -31,16 +32,92 @@ from datetime import datetime
 from pathlib import Path
 from tqdm import tqdm
 import json
+from concurrent.futures import ProcessPoolExecutor
+from collections import deque
 
 import torch
 import torch.nn as nn
-from torch.optim import Adam
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim import Adam, AdamW
+from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR, CosineAnnealingWarmRestarts, OneCycleLR
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 from src.informer.model import Informer
+
+
+def _basic_filter_chunk(chunk: pd.DataFrame) -> pd.DataFrame:
+    """Step 3: 基础过滤（降低内存/提升质量）"""
+    chunk = chunk.dropna()
+    chunk = chunk[(chunk['remaining_hours'] >= 0) & (chunk['remaining_hours'] <= 720)]
+    chunk = chunk[(chunk['sog'] >= 0) & (chunk['sog'] <= 30)]
+    # 过滤超长航程（只保留航程时长 <= 30天 = 720小时的航程）
+    if 'voyage_duration_hours' in chunk.columns:
+        valid_voyages = chunk.groupby('voyage_id')['voyage_duration_hours'].first()
+        valid_voyages = valid_voyages[valid_voyages <= 720].index
+        chunk = chunk[chunk['voyage_id'].isin(valid_voyages)]
+    return chunk
+
+
+def _summarize_chunk_for_step3(chunk: pd.DataFrame) -> pd.DataFrame:
+    """Step 3: 并行统计航程时间跨度（减少全局内存占用）"""
+    chunk = _basic_filter_chunk(chunk)
+    if len(chunk) == 0:
+        return pd.DataFrame(columns=['t_min', 't_max', 'dur', 'rows'])
+    chunk['postime_dt'] = pd.to_datetime(chunk['postime'])
+    summary = chunk.groupby('voyage_id').agg(
+        t_min=('postime_dt', 'min'),
+        t_max=('postime_dt', 'max'),
+        dur=('voyage_duration_hours', 'first'),
+        rows=('voyage_id', 'size')
+    )
+    return summary
+
+
+def _filter_and_select_chunk(chunk: pd.DataFrame, selected_voyage_ids: set) -> pd.DataFrame:
+    """Step 3: 过滤并保留目标航程"""
+    chunk = _basic_filter_chunk(chunk)
+    if len(chunk) == 0:
+        return chunk
+    return chunk[chunk['voyage_id'].isin(selected_voyage_ids)]
+
+
+def _update_minmax(current_min, current_max, values: np.ndarray):
+    if current_min is None:
+        return values.min(axis=0), values.max(axis=0)
+    return np.minimum(current_min, values.min(axis=0)), np.maximum(current_max, values.max(axis=0))
+
+
+def _update_welford(count, mean, m2, values: np.ndarray):
+    # values: 1D array
+    for x in values:
+        count += 1
+        delta = x - mean
+        mean += delta / count
+        delta2 = x - mean
+        m2 += delta * delta2
+    return count, mean, m2
+
+
+def _finalize_welford(count, mean, m2):
+    if count < 2:
+        return mean, 1.0
+    variance = m2 / (count - 1)
+    return mean, np.sqrt(variance)
+
+
+def _compute_geom_features(group: pd.DataFrame) -> pd.DataFrame:
+    """为单个航程计算几何特征"""
+    group = group.sort_values('postime')
+    dest_lat = group['lat'].iloc[-1]
+    dest_lon = group['lon'].iloc[-1]
+    dist_km = VoyageETADataset._haversine_km(group['lat'].values, group['lon'].values, dest_lat, dest_lon)
+    bearing_to_dest = VoyageETADataset._bearing_deg(group['lat'].values, group['lon'].values, dest_lat, dest_lon)
+    bearing_diff = np.abs(((bearing_to_dest - group['cog'].values + 180) % 360) - 180)
+    group = group.copy()
+    group['dist_to_dest_km'] = dist_km
+    group['bearing_diff'] = bearing_diff
+    return group
 
 
 def build_decoder_input(X, label_len, pred_len):
@@ -49,6 +126,60 @@ def build_decoder_input(X, label_len, pred_len):
     X_dec = np.zeros((len(X), dec_len, X.shape[-1]), dtype=X.dtype)
     X_dec[:, :label_len, :] = X[:, -label_len:, :]
     return X_dec
+
+
+class MemmapDataset(torch.utils.data.Dataset):
+    """支持memmap的数据集，避免全部加载到内存"""
+    
+    def __init__(self, X_path, X_mark_enc_path, X_dec_path, X_mark_dec_path, y_path, sd_path):
+        # 使用memmap模式打开文件（只读，不加载到内存）
+        self.X = np.load(X_path, mmap_mode='r')
+        self.X_mark_enc = np.load(X_mark_enc_path, mmap_mode='r')
+        self.X_dec = np.load(X_dec_path, mmap_mode='r')
+        self.X_mark_dec = np.load(X_mark_dec_path, mmap_mode='r')
+        self.y = np.load(y_path, mmap_mode='r')
+        self.sd = np.load(sd_path, mmap_mode='r')
+        self.length = len(self.y)
+    
+    def __len__(self):
+        return self.length
+    
+    def __getitem__(self, idx):
+        # 只有访问时才读取对应的数据
+        return (
+            torch.from_numpy(self.X[idx].copy()).float(),
+            torch.from_numpy(self.X_mark_enc[idx].copy()).float(),
+            torch.from_numpy(self.X_dec[idx].copy()).float(),
+            torch.from_numpy(self.X_mark_dec[idx].copy()).float(),
+            torch.tensor(self.y[idx]).float(),
+            torch.tensor(self.sd[idx]).float()
+        )
+
+
+def create_memmap_arrays(cache_dir: Path, n_samples: int, seq_len: int, label_len: int, pred_len: int, n_features: int = 6, prefix: str = 'train'):
+    """创建memmap数组用于增量写入序列"""
+    dec_len = label_len + pred_len
+    
+    X = np.lib.format.open_memmap(
+        cache_dir / f"X_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples, seq_len, n_features)
+    )
+    X_mark_enc = np.lib.format.open_memmap(
+        cache_dir / f"X_mark_enc_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples, seq_len, 5)
+    )
+    X_dec = np.lib.format.open_memmap(
+        cache_dir / f"X_dec_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples, dec_len, n_features)
+    )
+    X_mark_dec = np.lib.format.open_memmap(
+        cache_dir / f"X_mark_dec_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples, dec_len, 5)
+    )
+    y = np.lib.format.open_memmap(
+        cache_dir / f"y_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples,)
+    )
+    sd = np.lib.format.open_memmap(
+        cache_dir / f"sd_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples,)
+    )
+    
+    return X, X_mark_enc, X_dec, X_mark_dec, y, sd
 
 
 # ============================================================
@@ -297,11 +428,19 @@ class VoyageETADataset:
         return (log_target - self.target_mean) / self.target_std
     
     def inverse_normalize_target(self, normalized: np.ndarray) -> np.ndarray:
-        """反归一化"""
+        """反归一化目标值"""
         log_target = normalized * self.target_std + self.target_mean
         return np.expm1(log_target)
     
-    def create_sequences(self, voyage_df: pd.DataFrame, max_sequences: int = 500000, fit: bool = True, return_meta: bool = False) -> tuple:
+    def inverse_normalize_features(self, normalized: np.ndarray) -> np.ndarray:
+        """特征反归一化"""
+        if self.feature_min is None or self.feature_max is None:
+            return normalized
+        range_vals = self.feature_max - self.feature_min
+        range_vals[range_vals == 0] = 1.0
+        return normalized * range_vals + self.feature_min
+    
+    def create_sequences(self, voyage_df: pd.DataFrame, max_sequences: int = 50000000, fit: bool = True, return_meta: bool = False) -> tuple:
         """从航程数据创建序列（内存优化版 + 分层采样）
         
         优化策略：
@@ -531,12 +670,36 @@ def create_data_loaders(X, X_mark_enc, X_mark_dec, y, sailing_days, label_len, p
 class InformerTrainer:
     """Informer模型训练器"""
     
-    def __init__(self, model, device, lr=5e-6):
+    def __init__(self, model, device, lr=5e-6, scheduler_type='plateau', epochs=10, steps_per_epoch=None):
+        """
+        Args:
+            scheduler_type: 学习率调度器类型
+                - 'plateau': ReduceLROnPlateau (验证损失不下降时降低LR)
+                - 'cosine': CosineAnnealingLR (余弦退火)
+                - 'cosine_restart': CosineAnnealingWarmRestarts (带热重启的余弦退火)
+                - 'onecycle': OneCycleLR (一周期策略，自动找最佳LR)
+        """
         self.model = model.to(device)
         self.device = device
         self.criterion = nn.HuberLoss(delta=1.0)
-        self.optimizer = Adam(model.parameters(), lr=lr, weight_decay=1e-5)
-        self.scheduler = ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=3)
+        self.optimizer = AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
+        self.scheduler_type = scheduler_type
+        self.start_epoch = 0
+        self.best_val_loss = float('inf')
+        
+        # 根据类型选择学习率调度器
+        if scheduler_type == 'plateau':
+            self.scheduler = ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=3, verbose=True)
+        elif scheduler_type == 'cosine':
+            self.scheduler = CosineAnnealingLR(self.optimizer, T_max=epochs, eta_min=lr * 0.01)
+        elif scheduler_type == 'cosine_restart':
+            self.scheduler = CosineAnnealingWarmRestarts(self.optimizer, T_0=max(1, epochs // 3), T_mult=2, eta_min=lr * 0.01)
+        elif scheduler_type == 'onecycle':
+            if steps_per_epoch is None:
+                raise ValueError("OneCycleLR requires steps_per_epoch")
+            self.scheduler = OneCycleLR(self.optimizer, max_lr=lr * 10, epochs=epochs, steps_per_epoch=steps_per_epoch)
+        else:
+            raise ValueError(f"Unknown scheduler type: {scheduler_type}")
     
     def train_epoch(self, loader):
         self.model.train()
@@ -559,6 +722,10 @@ class InformerTrainer:
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
+            
+            # OneCycleLR 需要每个batch后更新
+            if self.scheduler_type == 'onecycle':
+                self.scheduler.step()
             
             total_loss += loss.item()
         
@@ -607,11 +774,50 @@ class InformerTrainer:
         
         return np.concatenate(preds), np.concatenate(trues), np.concatenate(sailing_days_list)
     
+    def step_scheduler(self, val_loss=None):
+        """更新学习率调度器"""
+        if self.scheduler_type == 'plateau':
+            self.scheduler.step(val_loss)
+        elif self.scheduler_type == 'onecycle':
+            pass  # OneCycleLR在train_epoch中每个batch后更新
+        else:
+            self.scheduler.step()
+    
     def save(self, path):
+        """保存模型权重"""
         torch.save(self.model.state_dict(), path)
     
+    def save_checkpoint(self, path, epoch, val_loss):
+        """保存完整训练状态（用于继续训练）"""
+        checkpoint = {
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict() if hasattr(self.scheduler, 'state_dict') else None,
+            'best_val_loss': val_loss,
+            'scheduler_type': self.scheduler_type
+        }
+        torch.save(checkpoint, path)
+        print(f"  -> 保存检查点: epoch={epoch+1}, val_loss={val_loss:.4f}")
+    
     def load(self, path):
+        """加载模型权重"""
         self.model.load_state_dict(torch.load(path, map_location=self.device))
+    
+    def load_checkpoint(self, path):
+        """加载完整训练状态（用于继续训练）"""
+        checkpoint = torch.load(path, map_location=self.device)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if checkpoint['scheduler_state_dict'] is not None and self.scheduler_type == checkpoint.get('scheduler_type'):
+            try:
+                self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            except:
+                print("  警告: 调度器状态加载失败，使用新调度器")
+        self.start_epoch = checkpoint['epoch'] + 1
+        self.best_val_loss = checkpoint.get('best_val_loss', float('inf'))
+        print(f"  从 epoch {self.start_epoch} 继续训练, best_val_loss={self.best_val_loss:.4f}")
+        return self.start_epoch
 
 
 # ============================================================
@@ -628,6 +834,53 @@ def calculate_metrics(y_pred, y_true):
     mape = np.mean(np.abs((y_pred[mask] - y_true[mask]) / y_true[mask])) * 100 if mask.sum() > 0 else 0
     
     return {'MSE': mse, 'MAE_hours': mae, 'MAE_days': mae / 24, 'RMSE': rmse, 'MAPE': mape}
+
+
+def analyze_bad_cases(y_pred, y_true, X_input, test_meta, dataset, save_dir, threshold=200, suffix=""):
+    """分析误差较大的样本并保存"""
+    errors = np.abs(y_pred - y_true)
+    bad_indices = np.where(errors > threshold)[0]
+    
+    if len(bad_indices) == 0:
+        return
+
+    print(f"\n【Bad Cases 分析 ({suffix.strip('_')})】发现 {len(bad_indices)} 个样本误差超过 {threshold} 小时")
+    
+    # 反归一化特征 (取序列最后一步)
+    # X_input: (N, seq_len, featuring_dim)
+    last_step_features = X_input[bad_indices, -1, :]
+    raw_features = dataset.inverse_normalize_features(last_step_features)
+    
+    feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff']
+    
+    records = []
+    for i, idx in enumerate(bad_indices):
+        rec = {
+            'mmsi': test_meta['mmsi'][idx],
+            'voyage_id': test_meta['voyage_id'][idx],
+            'pred_time': test_meta['pred_time'][idx],
+            'end_time': test_meta['end_time'][idx],
+            'true_hours': y_true[idx],
+            'pred_hours': y_pred[idx],
+            'error_hours': errors[idx],
+            'error_ratio': (errors[idx] / y_true[idx]) if y_true[idx] > 1.0 else 0
+        }
+        
+        # 添加特征
+        for j, col in enumerate(feature_cols):
+            if j < raw_features.shape[1]:
+                rec[col] = raw_features[i, j]
+            
+        records.append(rec)
+        
+    df = pd.DataFrame(records)
+    df = df.sort_values('error_hours', ascending=False)
+    
+    filename = f'bad_cases{suffix}.csv'
+    save_path = os.path.join(save_dir, filename)
+    df.to_csv(save_path, index=False)
+    print(f"  已保存 Bad Cases 到: {save_path}")
+    print(df[['voyage_id', 'true_hours', 'pred_hours', 'error_hours', 'dist_to_dest_km']].head().to_string())
 
 
 def plot_results(y_pred, y_true, sailing_days, save_dir, suffix="", title_prefix=""):
@@ -725,19 +978,35 @@ def main():
     parser.add_argument('--batch_size', type=int, default=32)
     parser.add_argument('--epochs', type=int, default=3)
     parser.add_argument('--lr', type=float, default=5e-6)
+    parser.add_argument('--scheduler', type=str, default='plateau', 
+                        choices=['plateau', 'cosine', 'cosine_restart', 'onecycle'],
+                        help='学习率调度器: plateau(默认), cosine, cosine_restart, onecycle')
+    parser.add_argument('--resume', action='store_true', help='从checkpoint继续训练')
     
     # 港口模型
     parser.add_argument('--train_port_model', action='store_true', help='训练港口停靠时间模型')
     parser.add_argument('--port_epochs', type=int, default=100)
     
     # 其他
-    parser.add_argument('--use_cache', action='store_true', help='使用缓存的预处理数据')
+    parser.add_argument('--use_cache', action='store_true', default=True, help='使用缓存的预处理数据')
     parser.add_argument('--max_files', type=int, default=None, help='处理文件数限制')
-    parser.add_argument('--max_voyages', type=int, default=5000, help='最多使用的航程数（控制内存）')
-    parser.add_argument('--max_sequences', type=int, default=500000, help='最多生成的训练序列数')
+    parser.add_argument('--max_voyages', type=int, default=150000, help='最多使用的航程数（控制内存）')
+    parser.add_argument('--max_sequences', type=int, default=50000000, help='最多生成的训练序列数')
+    parser.add_argument('--max_seqs_per_bucket', type=int, default=500000, help='每个bucket最多处理的序列数（控制内存峰值）')
     parser.add_argument('--eval_only', action='store_true', help='仅评估和重绘图（跳过训练）')
+    parser.add_argument('--step3_workers', type=int, default=os.cpu_count(), help='Step3并行工作进程数')
+    parser.add_argument('--step3_chunk_size', type=int, default=500000, help='Step3读取CSV的chunk大小')
+    parser.add_argument('--step3_spill', action='store_true', default=True, help='Step3将过滤数据分桶写入磁盘，降低内存峰值')
+    parser.add_argument('--step3_bucket_count', type=int, default=32, help='Step3分桶数量（spill模式）')
+    parser.add_argument('--step3_bucket_rows', type=int, default=1_000_000, help='Step3分桶缓存行数（spill模式）')
+    parser.add_argument('--use_memmap', action='store_true', default=True, help='使用memmap存储序列，避免OOM')
+    parser.add_argument('--no_use_memmap', action='store_true', help='禁用memmap模式')
     
     args = parser.parse_args()
+    
+    # 处理 --no_use_memmap
+    if args.no_use_memmap:
+        args.use_memmap = False
     
     os.makedirs(args.output_dir, exist_ok=True)
     os.makedirs(args.processed_dir, exist_ok=True)
@@ -791,30 +1060,71 @@ def main():
     cache_dir = Path(args.output_dir) / "cache_sequences" / cache_tag
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_ready = (cache_dir / "X_train.npy").exists()
+    use_memmap_mode = False  # 默认不使用memmap模式
     
     if args.use_cache and cache_ready:
         print(f"使用缓存: {cache_dir}")
-        X_train = np.load(cache_dir / "X_train.npy", allow_pickle=True)
-        X_mark_enc_train = np.load(cache_dir / "X_mark_enc_train.npy", allow_pickle=True)
-        X_mark_dec_train = np.load(cache_dir / "X_mark_dec_train.npy", allow_pickle=True)
-        y_train = np.load(cache_dir / "y_train.npy", allow_pickle=True)
-        sd_train = np.load(cache_dir / "sd_train.npy", allow_pickle=True)
+        
+        # 检查是否有X_dec文件（memmap模式生成的缓存）
+        has_dec_cache = (cache_dir / "X_dec_train.npy").exists()
+        
+        if args.use_memmap and has_dec_cache:
+            # 使用memmap模式加载（避免全部加载到内存）
+            print("使用memmap模式加载缓存...")
+            use_memmap_mode = True
+            
+            dataset = VoyageETADataset(seq_len=args.seq_len, label_len=args.label_len, pred_len=args.pred_len)
+            dataset.load_params(os.path.join(args.output_dir, 'norm_params.npz'))
+            
+            train_dataset = MemmapDataset(
+                cache_dir / "X_train.npy", cache_dir / "X_mark_enc_train.npy",
+                cache_dir / "X_dec_train.npy", cache_dir / "X_mark_dec_train.npy",
+                cache_dir / "y_train.npy", cache_dir / "sd_train.npy"
+            )
+            val_dataset = MemmapDataset(
+                cache_dir / "X_val.npy", cache_dir / "X_mark_enc_val.npy",
+                cache_dir / "X_dec_val.npy", cache_dir / "X_mark_dec_val.npy",
+                cache_dir / "y_val.npy", cache_dir / "sd_val.npy"
+            )
+            test_dataset = MemmapDataset(
+                cache_dir / "X_test.npy", cache_dir / "X_mark_enc_test.npy",
+                cache_dir / "X_dec_test.npy", cache_dir / "X_mark_dec_test.npy",
+                cache_dir / "y_test.npy", cache_dir / "sd_test.npy"
+            )
+            
+            train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
+            val_loader = DataLoader(val_dataset, batch_size=args.batch_size, num_workers=2, pin_memory=True)
+            test_loader = DataLoader(test_dataset, batch_size=args.batch_size, num_workers=2, pin_memory=True)
+            
+            # 为评估阶段准备
+            X_test = np.load(cache_dir / "X_test.npy", mmap_mode='r')
+            y_test = np.load(cache_dir / "y_test.npy", mmap_mode='r')
+            test_meta = np.load(cache_dir / "test_meta.npy", allow_pickle=True).item()
+            
+            print(f"训练集: {len(train_dataset):,}, 验证集: {len(val_dataset):,}, 测试集: {len(test_dataset):,}")
+        else:
+            # 传统方式加载缓存
+            X_train = np.load(cache_dir / "X_train.npy", allow_pickle=True)
+            X_mark_enc_train = np.load(cache_dir / "X_mark_enc_train.npy", allow_pickle=True)
+            X_mark_dec_train = np.load(cache_dir / "X_mark_dec_train.npy", allow_pickle=True)
+            y_train = np.load(cache_dir / "y_train.npy", allow_pickle=True)
+            sd_train = np.load(cache_dir / "sd_train.npy", allow_pickle=True)
 
-        X_val = np.load(cache_dir / "X_val.npy", allow_pickle=True)
-        X_mark_enc_val = np.load(cache_dir / "X_mark_enc_val.npy", allow_pickle=True)
-        X_mark_dec_val = np.load(cache_dir / "X_mark_dec_val.npy", allow_pickle=True)
-        y_val = np.load(cache_dir / "y_val.npy", allow_pickle=True)
-        sd_val = np.load(cache_dir / "sd_val.npy", allow_pickle=True)
+            X_val = np.load(cache_dir / "X_val.npy", allow_pickle=True)
+            X_mark_enc_val = np.load(cache_dir / "X_mark_enc_val.npy", allow_pickle=True)
+            X_mark_dec_val = np.load(cache_dir / "X_mark_dec_val.npy", allow_pickle=True)
+            y_val = np.load(cache_dir / "y_val.npy", allow_pickle=True)
+            sd_val = np.load(cache_dir / "sd_val.npy", allow_pickle=True)
 
-        X_test = np.load(cache_dir / "X_test.npy", allow_pickle=True)
-        X_mark_enc_test = np.load(cache_dir / "X_mark_enc_test.npy", allow_pickle=True)
-        X_mark_dec_test = np.load(cache_dir / "X_mark_dec_test.npy", allow_pickle=True)
-        y_test = np.load(cache_dir / "y_test.npy", allow_pickle=True)
-        sd_test = np.load(cache_dir / "sd_test.npy", allow_pickle=True)
-        test_meta = np.load(cache_dir / "test_meta.npy", allow_pickle=True).item()
+            X_test = np.load(cache_dir / "X_test.npy", allow_pickle=True)
+            X_mark_enc_test = np.load(cache_dir / "X_mark_enc_test.npy", allow_pickle=True)
+            X_mark_dec_test = np.load(cache_dir / "X_mark_dec_test.npy", allow_pickle=True)
+            y_test = np.load(cache_dir / "y_test.npy", allow_pickle=True)
+            sd_test = np.load(cache_dir / "sd_test.npy", allow_pickle=True)
+            test_meta = np.load(cache_dir / "test_meta.npy", allow_pickle=True).item()
 
-        dataset = VoyageETADataset(seq_len=args.seq_len, label_len=args.label_len, pred_len=args.pred_len)
-        dataset.load_params(os.path.join(args.output_dir, 'norm_params.npz'))
+            dataset = VoyageETADataset(seq_len=args.seq_len, label_len=args.label_len, pred_len=args.pred_len)
+            dataset.load_params(os.path.join(args.output_dir, 'norm_params.npz'))
     else:
         # 分块读取CSV，只加载需要的列，使用float32
         print("分块读取航程数据...")
@@ -822,116 +1132,425 @@ def main():
         dtype = {'lat': 'float32', 'lon': 'float32', 'sog': 'float32', 'cog': 'float32', 
                  'remaining_hours': 'float32', 'voyage_duration_hours': 'float32'}
 
-        chunks = []
-        voyage_ids_seen = set()
-        total_rows = 0
+        chunk_size = args.step3_chunk_size
+        num_workers = max(1, args.step3_workers or 1)
+        print(f"Step3并行: workers={num_workers}, chunk_size={chunk_size}")
 
-        for chunk in pd.read_csv(voyage_path, usecols=use_cols, dtype=dtype, chunksize=500000):
-            # 数据过滤
-            chunk = chunk.dropna()
-            chunk = chunk[(chunk['remaining_hours'] >= 0) & (chunk['remaining_hours'] <= 720)]
-            chunk = chunk[(chunk['sog'] >= 0) & (chunk['sog'] <= 30)]
-            
-            # 过滤超长航程（只保留航程时长 <= 30天 = 720小时的航程）
-            if 'voyage_duration_hours' in chunk.columns:
-                valid_voyages = chunk.groupby('voyage_id')['voyage_duration_hours'].first()
-                valid_voyages = valid_voyages[valid_voyages <= 720].index
-                chunk = chunk[chunk['voyage_id'].isin(valid_voyages)]
-            
-            # 过滤时间跨度异常的航程（实际时间跨度不应超过标记时长的1.5倍）
-            chunk['postime_dt'] = pd.to_datetime(chunk['postime'])
-            voyage_time_check = chunk.groupby('voyage_id').agg({
-                'postime_dt': ['min', 'max'],
-                'voyage_duration_hours': 'first'
-            })
-            voyage_time_check.columns = ['t_min', 't_max', 'dur']
-            voyage_time_check['actual_span'] = (voyage_time_check['t_max'] - voyage_time_check['t_min']).dt.total_seconds() / 3600
-            voyage_time_check['ratio'] = voyage_time_check['actual_span'] / voyage_time_check['dur'].clip(lower=1)
-            valid_time_voyages = voyage_time_check[voyage_time_check['ratio'] <= 1.5].index
-            chunk = chunk[chunk['voyage_id'].isin(valid_time_voyages)]
-            chunk = chunk.drop(columns=['postime_dt'])
-            
-            # 检查新航程
-            new_voyage_ids = set(chunk['voyage_id'].unique()) - voyage_ids_seen
-            
-            if len(voyage_ids_seen) >= max_voyages:
-                # 只保留已见过的航程数据
-                chunk = chunk[chunk['voyage_id'].isin(voyage_ids_seen)]
-            else:
-                # 添加新航程直到达到上限
-                remaining = max_voyages - len(voyage_ids_seen)
-                new_to_add = list(new_voyage_ids)[:remaining]
-                voyage_ids_seen.update(new_to_add)
-                chunk = chunk[chunk['voyage_id'].isin(voyage_ids_seen)]
-            
-            if len(chunk) > 0:
-                chunks.append(chunk)
-                total_rows += len(chunk)
-            
-            if len(voyage_ids_seen) >= max_voyages and total_rows > 5000000:
-                break  # 足够数据了
+        # Pass 1: 并行统计航程时间跨度（避免全量内存）
+        print("统计航程时间跨度(并行)...")
+        summaries = []
+        if num_workers > 1:
+            with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                futures = deque()
+                for chunk in pd.read_csv(voyage_path, usecols=use_cols, dtype=dtype, chunksize=chunk_size, memory_map=True):
+                    futures.append(executor.submit(_summarize_chunk_for_step3, chunk))
+                    if len(futures) >= num_workers * 2:
+                        summaries.append(futures.popleft().result())
+                while futures:
+                    summaries.append(futures.popleft().result())
+        else:
+            for chunk in pd.read_csv(voyage_path, usecols=use_cols, dtype=dtype, chunksize=chunk_size, memory_map=True):
+                summaries.append(_summarize_chunk_for_step3(chunk))
 
-        training_df = pd.concat(chunks, ignore_index=True)
-        del chunks
-        import gc
-        gc.collect()
-
-        # 全局过滤：移除时间跨度异常的航程（跨多个chunk的情况）
-        print("过滤时间跨度异常的航程...")
-        training_df['postime_dt'] = pd.to_datetime(training_df['postime'])
-        voyage_time_check = training_df.groupby('voyage_id').agg({
-            'postime_dt': ['min', 'max'],
-            'voyage_duration_hours': 'first'
-        })
-        voyage_time_check.columns = ['t_min', 't_max', 'dur']
-        voyage_time_check['actual_span'] = (voyage_time_check['t_max'] - voyage_time_check['t_min']).dt.total_seconds() / 3600
-        voyage_time_check['ratio'] = voyage_time_check['actual_span'] / voyage_time_check['dur'].clip(lower=1)
-        
-        bad_voyages = voyage_time_check[voyage_time_check['ratio'] > 1.5].index
-        print(f"  移除 {len(bad_voyages)} 个时间跨度异常的航程")
-        training_df = training_df[~training_df['voyage_id'].isin(bad_voyages)]
-        training_df = training_df.drop(columns=['postime_dt'])
-        gc.collect()
-
-        print(f"采样航程数: {training_df['voyage_id'].nunique():,}")
-        print(f"过滤后数据: {len(training_df):,} 条")
-
-        if len(training_df) < 1000:
+        if len(summaries) == 0:
             print("数据量不足，请先处理更多文件")
             return
 
-        dataset = VoyageETADataset(seq_len=args.seq_len, label_len=args.label_len, pred_len=args.pred_len)
+        summary_df = pd.concat(summaries).groupby(level=0).agg(
+            t_min=('t_min', 'min'),
+            t_max=('t_max', 'max'),
+            dur=('dur', 'first'),
+            rows=('rows', 'sum')
+        )
+        summary_df['actual_span'] = (summary_df['t_max'] - summary_df['t_min']).dt.total_seconds() / 3600
+        summary_df['ratio'] = summary_df['actual_span'] / summary_df['dur'].clip(lower=1)
+        valid_time_voyages = summary_df[summary_df['ratio'] <= 1.5].index
 
-        # 按航程划分训练/验证/测试，避免数据泄漏
-        voyage_ids = training_df['voyage_id'].unique()
+        # 采样航程
         rng = np.random.default_rng(42)
-        rng.shuffle(voyage_ids)
-        n_total = len(voyage_ids)
-        n_train = int(n_total * 0.7)
-        n_val = int(n_total * 0.15)
-        train_ids = set(voyage_ids[:n_train])
-        val_ids = set(voyage_ids[n_train:n_train + n_val])
-        test_ids = set(voyage_ids[n_train + n_val:])
+        voyage_ids = np.array(valid_time_voyages)
+        if len(voyage_ids) > max_voyages:
+            selected_voyage_ids = set(rng.choice(voyage_ids, size=max_voyages, replace=False))
+        else:
+            selected_voyage_ids = set(voyage_ids)
 
-        train_df = training_df[training_df['voyage_id'].isin(train_ids)]
-        val_df = training_df[training_df['voyage_id'].isin(val_ids)]
-        test_df = training_df[training_df['voyage_id'].isin(test_ids)]
+        print(f"候选航程: {len(valid_time_voyages):,}, 采样航程: {len(selected_voyage_ids):,}")
 
-        # 生成序列（只用训练集拟合归一化参数）
-        X_train, X_mark_enc_train, X_mark_dec_train, y_train, sd_train = dataset.create_sequences(
-            train_df, max_sequences=args.max_sequences, fit=True
-        )
-        X_val, X_mark_enc_val, X_mark_dec_val, y_val, sd_val = dataset.create_sequences(
-            val_df, max_sequences=max(1, args.max_sequences // 10), fit=False
-        )
-        X_test, X_mark_enc_test, X_mark_dec_test, y_test, sd_test, test_meta = dataset.create_sequences(
-            test_df, max_sequences=max(1, args.max_sequences // 10), fit=False, return_meta=True
-        )
+        # Pass 2: 并行过滤并收集训练数据
+        print("收集训练数据(并行)...")
+        total_rows = 0
+        spill_dir = cache_dir / "step3_spill"
+        if args.step3_spill:
+            spill_dir.mkdir(parents=True, exist_ok=True)
+        
+        if args.step3_spill:
+            bucket_count = max(4, args.step3_bucket_count)
+            bucket_rows = max(100_000, args.step3_bucket_rows)
+            bucket_buffers = {i: [] for i in range(bucket_count)}
+            bucket_counts = {i: 0 for i in range(bucket_count)}
+            bucket_parts = {i: 0 for i in range(bucket_count)}
 
-        # 释放原始数据内存
-        del training_df, train_df, val_df, test_df
-        gc.collect()
+            def flush_bucket(bucket_id: int):
+                if bucket_counts[bucket_id] == 0:
+                    return
+                df_bucket = pd.concat(bucket_buffers[bucket_id], ignore_index=True, copy=False)
+                part = bucket_parts[bucket_id]
+                file_path = spill_dir / f"bucket_{bucket_id}_part_{part}.pkl"
+                df_bucket.to_pickle(file_path)
+                bucket_parts[bucket_id] += 1
+                bucket_buffers[bucket_id].clear()
+                bucket_counts[bucket_id] = 0
 
+            def add_to_buckets(df: pd.DataFrame):
+                nonlocal total_rows
+                if len(df) == 0:
+                    return
+                total_rows += len(df)
+                # 分桶写入
+                bucket_ids = df['voyage_id'].apply(lambda x: hash(x) % bucket_count).values
+                for b in range(bucket_count):
+                    mask = bucket_ids == b
+                    if mask.sum() == 0:
+                        continue
+                    bucket_buffers[b].append(df.loc[mask])
+                    bucket_counts[b] += mask.sum()
+                    if bucket_counts[b] >= bucket_rows:
+                        flush_bucket(b)
+
+            if num_workers > 1:
+                with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                    futures = deque()
+                    stop_reading = False
+                    for chunk in pd.read_csv(voyage_path, usecols=use_cols, dtype=dtype, chunksize=chunk_size, memory_map=True):
+                        if stop_reading:
+                            break
+                        futures.append(executor.submit(_filter_and_select_chunk, chunk, selected_voyage_ids))
+                        if len(futures) >= num_workers * 2:
+                            result = futures.popleft().result()
+                            add_to_buckets(result)
+                    while futures:
+                        result = futures.popleft().result()
+                        add_to_buckets(result)
+            else:
+                for chunk in pd.read_csv(voyage_path, usecols=use_cols, dtype=dtype, chunksize=chunk_size, memory_map=True):
+                    result = _filter_and_select_chunk(chunk, selected_voyage_ids)
+                    add_to_buckets(result)
+
+            # flush remaining
+            for b in range(bucket_count):
+                flush_bucket(b)
+
+            print(f"已写入分桶数据至: {spill_dir}")
+        else:
+            chunks = []
+            if num_workers > 1:
+                with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                    futures = deque()
+                    stop_reading = False
+                    for chunk in pd.read_csv(voyage_path, usecols=use_cols, dtype=dtype, chunksize=chunk_size, memory_map=True):
+                        if stop_reading:
+                            break
+                        futures.append(executor.submit(_filter_and_select_chunk, chunk, selected_voyage_ids))
+                        if len(futures) >= num_workers * 2:
+                            result = futures.popleft().result()
+                            if len(result) > 0:
+                                chunks.append(result)
+                                total_rows += len(result)
+                    while futures:
+                        result = futures.popleft().result()
+                        if len(result) > 0:
+                            chunks.append(result)
+                            total_rows += len(result)
+            else:
+                for chunk in pd.read_csv(voyage_path, usecols=use_cols, dtype=dtype, chunksize=chunk_size, memory_map=True):
+                    result = _filter_and_select_chunk(chunk, selected_voyage_ids)
+                    if len(result) > 0:
+                        chunks.append(result)
+                        total_rows += len(result)
+
+            training_df = pd.concat(chunks, ignore_index=True, copy=False)
+            del chunks
+            gc.collect()
+
+            # 降低内存占用
+            if 'mmsi' in training_df.columns:
+                training_df['mmsi'] = training_df['mmsi'].astype('int32')
+            training_df['voyage_id'] = training_df['voyage_id'].astype('category')
+
+            print(f"采样航程数: {training_df['voyage_id'].nunique():,}")
+            print(f"过滤后数据: {len(training_df):,} 条")
+
+            if len(training_df) < 1000:
+                print("数据量不足，请先处理更多文件")
+                return
+
+            dataset = VoyageETADataset(seq_len=args.seq_len, label_len=args.label_len, pred_len=args.pred_len)
+
+            # 按航程划分训练/验证/测试，避免数据泄漏
+            voyage_ids = training_df['voyage_id'].unique()
+            rng = np.random.default_rng(42)
+            rng.shuffle(voyage_ids)
+            n_total = len(voyage_ids)
+            n_train = int(n_total * 0.7)
+            n_val = int(n_total * 0.15)
+            train_ids = set(voyage_ids[:n_train])
+            val_ids = set(voyage_ids[n_train:n_train + n_val])
+            test_ids = set(voyage_ids[n_train + n_val:])
+
+            train_df = training_df[training_df['voyage_id'].isin(train_ids)]
+            val_df = training_df[training_df['voyage_id'].isin(val_ids)]
+            test_df = training_df[training_df['voyage_id'].isin(test_ids)]
+
+            # 生成序列（只用训练集拟合归一化参数）
+            X_train, X_mark_enc_train, X_mark_dec_train, y_train, sd_train = dataset.create_sequences(
+                train_df, max_sequences=args.max_sequences, fit=True
+            )
+            X_val, X_mark_enc_val, X_mark_dec_val, y_val, sd_val = dataset.create_sequences(
+                val_df, max_sequences=max(1, args.max_sequences // 10), fit=False
+            )
+            X_test, X_mark_enc_test, X_mark_dec_test, y_test, sd_test, test_meta = dataset.create_sequences(
+                test_df, max_sequences=max(1, args.max_sequences // 10), fit=False, return_meta=True
+            )
+
+            # 释放原始数据内存
+            del training_df, train_df, val_df, test_df
+            gc.collect()
+
+        if args.step3_spill:
+            # 使用分桶文件进行流式处理（减少内存峰值）
+            bucket_files = sorted(spill_dir.glob("bucket_*_part_*.pkl"))
+            if len(bucket_files) == 0:
+                print("Spill数据为空，无法继续")
+                return
+
+            dataset = VoyageETADataset(seq_len=args.seq_len, label_len=args.label_len, pred_len=args.pred_len)
+
+            # 按航程划分训练/验证/测试，避免数据泄漏
+            voyage_ids = np.array(list(selected_voyage_ids))
+            rng = np.random.default_rng(42)
+            rng.shuffle(voyage_ids)
+            n_total = len(voyage_ids)
+            n_train = int(n_total * 0.7)
+            n_val = int(n_total * 0.15)
+            train_ids = set(voyage_ids[:n_train])
+            val_ids = set(voyage_ids[n_train:n_train + n_val])
+            test_ids = set(voyage_ids[n_train + n_val:])
+
+            # Pass A: 仅用训练集统计归一化参数（流式）
+            print("统计归一化参数(流式)...")
+            feat_min = None
+            feat_max = None
+            count, mean, m2 = 0, 0.0, 0.0
+            feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff']
+            for bf in bucket_files:
+                df_bucket = pd.read_pickle(bf)
+                df_bucket = df_bucket[df_bucket['voyage_id'].isin(train_ids)]
+                if len(df_bucket) == 0:
+                    continue
+                for _, group in df_bucket.groupby('voyage_id'):
+                    group = _compute_geom_features(group)
+                    feat_vals = group[feature_cols].values.astype(np.float32)
+                    feat_min, feat_max = _update_minmax(feat_min, feat_max, feat_vals)
+                    target_vals = np.log1p(group['remaining_hours'].values.astype(np.float32))
+                    count, mean, m2 = _update_welford(count, mean, m2, target_vals)
+
+            dataset.feature_min = feat_min
+            dataset.feature_max = feat_max
+            dataset.target_mean, dataset.target_std = _finalize_welford(count, mean, m2)
+
+            # Pass B: 统计每个split可用的总序列数
+            print("统计各split序列数量...")
+            train_seq_count = 0
+            val_seq_count = 0
+            test_seq_count = 0
+            
+            for bf in bucket_files:
+                df_bucket = pd.read_pickle(bf)
+                if len(df_bucket) == 0:
+                    continue
+                # 统计训练集
+                train_df = df_bucket[df_bucket['voyage_id'].isin(train_ids)]
+                for vid, group in train_df.groupby('voyage_id'):
+                    train_seq_count += max(0, len(group) - args.seq_len - args.pred_len + 1)
+                # 统计验证集
+                val_df = df_bucket[df_bucket['voyage_id'].isin(val_ids)]
+                for vid, group in val_df.groupby('voyage_id'):
+                    val_seq_count += max(0, len(group) - args.seq_len - args.pred_len + 1)
+                # 统计测试集
+                test_df = df_bucket[df_bucket['voyage_id'].isin(test_ids)]
+                for vid, group in test_df.groupby('voyage_id'):
+                    test_seq_count += max(0, len(group) - args.seq_len - args.pred_len + 1)
+                del df_bucket, train_df, val_df, test_df
+                gc.collect()
+            
+            # 限制最大序列数
+            train_seq_count = min(train_seq_count, args.max_sequences)
+            val_seq_count = min(val_seq_count, args.max_sequences // 10)
+            test_seq_count = min(test_seq_count, args.max_sequences // 10)
+            
+            print(f"  预估序列: train={train_seq_count:,}, val={val_seq_count:,}, test={test_seq_count:,}")
+            
+            # 创建memmap数组
+            print("创建memmap数组...")
+            if args.use_memmap:
+                X_train_mm, X_mark_enc_train_mm, X_dec_train_mm, X_mark_dec_train_mm, y_train_mm, sd_train_mm = create_memmap_arrays(
+                    cache_dir, train_seq_count, args.seq_len, args.label_len, args.pred_len, prefix='train'
+                )
+                X_val_mm, X_mark_enc_val_mm, X_dec_val_mm, X_mark_dec_val_mm, y_val_mm, sd_val_mm = create_memmap_arrays(
+                    cache_dir, val_seq_count, args.seq_len, args.label_len, args.pred_len, prefix='val'
+                )
+                X_test_mm, X_mark_enc_test_mm, X_dec_test_mm, X_mark_dec_test_mm, y_test_mm, sd_test_mm = create_memmap_arrays(
+                    cache_dir, test_seq_count, args.seq_len, args.label_len, args.pred_len, prefix='test'
+                )
+            
+            # Pass C: 生成序列并增量写入memmap
+            print("生成序列(memmap增量写入)...")
+            train_idx = 0
+            val_idx = 0
+            test_idx = 0
+            meta_list = []
+            
+            # 使用参数控制每个bucket处理的最大序列数，避免单次分配过大内存
+            max_seqs_per_bucket = args.max_seqs_per_bucket
+            
+            for bf_idx, bf in enumerate(bucket_files):
+                df_bucket = pd.read_pickle(bf)
+                if len(df_bucket) == 0:
+                    continue
+                df_bucket['mmsi'] = df_bucket['mmsi'].astype('int32')
+                
+                # 处理训练集
+                train_df = df_bucket[df_bucket['voyage_id'].isin(train_ids)]
+                if len(train_df) > 0 and train_idx < train_seq_count:
+                    # 限制单次调用的max_sequences，避免预分配过大数组
+                    bucket_max = min(max_seqs_per_bucket, train_seq_count - train_idx)
+                    Xt, Xme, Xmd, yt, sdt = dataset.create_sequences(
+                        train_df, max_sequences=bucket_max, fit=False
+                    )
+                    n_new = len(Xt)
+                    if train_idx + n_new > train_seq_count:
+                        n_new = train_seq_count - train_idx
+                        Xt, Xme, Xmd, yt, sdt = Xt[:n_new], Xme[:n_new], Xmd[:n_new], yt[:n_new], sdt[:n_new]
+                    
+                    if args.use_memmap:
+                        X_train_mm[train_idx:train_idx+n_new] = Xt
+                        X_mark_enc_train_mm[train_idx:train_idx+n_new] = Xme
+                        X_dec_train_mm[train_idx:train_idx+n_new] = build_decoder_input(Xt, args.label_len, args.pred_len)
+                        X_mark_dec_train_mm[train_idx:train_idx+n_new] = Xmd
+                        y_train_mm[train_idx:train_idx+n_new] = yt
+                        sd_train_mm[train_idx:train_idx+n_new] = sdt
+                    train_idx += n_new
+                    del Xt, Xme, Xmd, yt, sdt
+                
+                # 处理验证集
+                val_df = df_bucket[df_bucket['voyage_id'].isin(val_ids)]
+                if len(val_df) > 0 and val_idx < val_seq_count:
+                    bucket_max_val = min(max_seqs_per_bucket, val_seq_count - val_idx)
+                    Xv, Xmev, Xmdv, yv, sdv = dataset.create_sequences(
+                        val_df, max_sequences=bucket_max_val, fit=False
+                    )
+                    n_new = len(Xv)
+                    if val_idx + n_new > val_seq_count:
+                        n_new = val_seq_count - val_idx
+                        Xv, Xmev, Xmdv, yv, sdv = Xv[:n_new], Xmev[:n_new], Xmdv[:n_new], yv[:n_new], sdv[:n_new]
+                    
+                    if args.use_memmap:
+                        X_val_mm[val_idx:val_idx+n_new] = Xv
+                        X_mark_enc_val_mm[val_idx:val_idx+n_new] = Xmev
+                        X_dec_val_mm[val_idx:val_idx+n_new] = build_decoder_input(Xv, args.label_len, args.pred_len)
+                        X_mark_dec_val_mm[val_idx:val_idx+n_new] = Xmdv
+                        y_val_mm[val_idx:val_idx+n_new] = yv
+                        sd_val_mm[val_idx:val_idx+n_new] = sdv
+                    val_idx += n_new
+                    del Xv, Xmev, Xmdv, yv, sdv
+                
+                # 处理测试集
+                test_df = df_bucket[df_bucket['voyage_id'].isin(test_ids)]
+                if len(test_df) > 0 and test_idx < test_seq_count:
+                    bucket_max_test = min(max_seqs_per_bucket, test_seq_count - test_idx)
+                    Xte, Xmete, Xmdte, yte, sdte, meta = dataset.create_sequences(
+                        test_df, max_sequences=bucket_max_test, fit=False, return_meta=True
+                    )
+                    n_new = len(Xte)
+                    if test_idx + n_new > test_seq_count:
+                        n_new = test_seq_count - test_idx
+                        Xte, Xmete, Xmdte, yte, sdte = Xte[:n_new], Xmete[:n_new], Xmdte[:n_new], yte[:n_new], sdte[:n_new]
+                        meta = {k: v[:n_new] for k, v in meta.items()}
+                    
+                    if args.use_memmap:
+                        X_test_mm[test_idx:test_idx+n_new] = Xte
+                        X_mark_enc_test_mm[test_idx:test_idx+n_new] = Xmete
+                        X_dec_test_mm[test_idx:test_idx+n_new] = build_decoder_input(Xte, args.label_len, args.pred_len)
+                        X_mark_dec_test_mm[test_idx:test_idx+n_new] = Xmdte
+                        y_test_mm[test_idx:test_idx+n_new] = yte
+                        sd_test_mm[test_idx:test_idx+n_new] = sdte
+                    meta_list.append(meta)
+                    test_idx += n_new
+                    del Xte, Xmete, Xmdte, yte, sdte
+                
+                del df_bucket
+                gc.collect()
+                
+                if (bf_idx + 1) % 8 == 0:
+                    print(f"  处理进度: {bf_idx+1}/{len(bucket_files)} buckets, train={train_idx:,}, val={val_idx:,}, test={test_idx:,}")
+            
+            # Flush memmap to disk
+            if args.use_memmap:
+                del X_train_mm, X_mark_enc_train_mm, X_dec_train_mm, X_mark_dec_train_mm, y_train_mm, sd_train_mm
+                del X_val_mm, X_mark_enc_val_mm, X_dec_val_mm, X_mark_dec_val_mm, y_val_mm, sd_val_mm
+                del X_test_mm, X_mark_enc_test_mm, X_dec_test_mm, X_mark_dec_test_mm, y_test_mm, sd_test_mm
+                gc.collect()
+            
+            # 合并meta
+            if meta_list:
+                test_meta = {
+                    'mmsi': np.concatenate([m['mmsi'] for m in meta_list]),
+                    'voyage_id': np.concatenate([m['voyage_id'] for m in meta_list]),
+                    'pred_time': np.concatenate([m['pred_time'] for m in meta_list]),
+                    'end_time': np.concatenate([m['end_time'] for m in meta_list])
+                }
+            else:
+                test_meta = {'mmsi': np.array([]), 'voyage_id': np.array([]), 'pred_time': np.array([]), 'end_time': np.array([])}
+            
+            print(f"实际序列: train={train_idx:,}, val={val_idx:,}, test={test_idx:,}")
+            
+            # 保存归一化参数和meta
+            dataset.save_params(os.path.join(args.output_dir, 'norm_params.npz'))
+            np.save(cache_dir / "test_meta.npy", test_meta, allow_pickle=True)
+            
+            # 使用memmap模式加载数据创建DataLoader
+            print("创建DataLoader (memmap模式)...")
+            train_dataset = MemmapDataset(
+                cache_dir / "X_train.npy", cache_dir / "X_mark_enc_train.npy",
+                cache_dir / "X_dec_train.npy", cache_dir / "X_mark_dec_train.npy",
+                cache_dir / "y_train.npy", cache_dir / "sd_train.npy"
+            )
+            val_dataset = MemmapDataset(
+                cache_dir / "X_val.npy", cache_dir / "X_mark_enc_val.npy",
+                cache_dir / "X_dec_val.npy", cache_dir / "X_mark_dec_val.npy",
+                cache_dir / "y_val.npy", cache_dir / "sd_val.npy"
+            )
+            test_dataset = MemmapDataset(
+                cache_dir / "X_test.npy", cache_dir / "X_mark_enc_test.npy",
+                cache_dir / "X_dec_test.npy", cache_dir / "X_mark_dec_test.npy",
+                cache_dir / "y_test.npy", cache_dir / "sd_test.npy"
+            )
+            
+            train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
+            val_loader = DataLoader(val_dataset, batch_size=args.batch_size, num_workers=2, pin_memory=True)
+            test_loader = DataLoader(test_dataset, batch_size=args.batch_size, num_workers=2, pin_memory=True)
+            
+            # 为评估阶段准备（需要完整加载test数据）
+            X_test = np.load(cache_dir / "X_test.npy", mmap_mode='r')
+            y_test = np.load(cache_dir / "y_test.npy", mmap_mode='r')
+            
+            print(f"训练集: {len(train_dataset):,}, 验证集: {len(val_dataset):,}, 测试集: {len(test_dataset):,}")
+            
+            # spill+memmap模式已经完成DataLoader创建，跳转到Step 4
+            use_memmap_mode = True
+
+    # 如果不是memmap模式，使用传统方式创建DataLoader
+    if not use_memmap_mode:
         print(f"训练序列: {len(X_train):,}, 验证序列: {len(X_val):,}, 测试序列: {len(X_test):,}")
         print(f"训练形状: X={X_train.shape}, y={y_train.shape}")
 
@@ -956,40 +1575,40 @@ def main():
         np.save(cache_dir / "sd_test.npy", sd_test)
         np.save(cache_dir / "test_meta.npy", test_meta, allow_pickle=True)
 
-    X_dec_train = build_decoder_input(X_train, args.label_len, args.pred_len)
-    X_dec_val = build_decoder_input(X_val, args.label_len, args.pred_len)
-    X_dec_test = build_decoder_input(X_test, args.label_len, args.pred_len)
+        X_dec_train = build_decoder_input(X_train, args.label_len, args.pred_len)
+        X_dec_val = build_decoder_input(X_val, args.label_len, args.pred_len)
+        X_dec_test = build_decoder_input(X_test, args.label_len, args.pred_len)
 
-    train_dataset = TensorDataset(
-        torch.FloatTensor(X_train),
-        torch.FloatTensor(X_mark_enc_train),
-        torch.FloatTensor(X_dec_train),
-        torch.FloatTensor(X_mark_dec_train),
-        torch.FloatTensor(y_train),
-        torch.FloatTensor(sd_train)
-    )
-    val_dataset = TensorDataset(
-        torch.FloatTensor(X_val),
-        torch.FloatTensor(X_mark_enc_val),
-        torch.FloatTensor(X_dec_val),
-        torch.FloatTensor(X_mark_dec_val),
-        torch.FloatTensor(y_val),
-        torch.FloatTensor(sd_val)
-    )
-    test_dataset = TensorDataset(
-        torch.FloatTensor(X_test),
-        torch.FloatTensor(X_mark_enc_test),
-        torch.FloatTensor(X_dec_test),
-        torch.FloatTensor(X_mark_dec_test),
-        torch.FloatTensor(y_test),
-        torch.FloatTensor(sd_test)
-    )
+        train_dataset = TensorDataset(
+            torch.FloatTensor(X_train),
+            torch.FloatTensor(X_mark_enc_train),
+            torch.FloatTensor(X_dec_train),
+            torch.FloatTensor(X_mark_dec_train),
+            torch.FloatTensor(y_train),
+            torch.FloatTensor(sd_train)
+        )
+        val_dataset = TensorDataset(
+            torch.FloatTensor(X_val),
+            torch.FloatTensor(X_mark_enc_val),
+            torch.FloatTensor(X_dec_val),
+            torch.FloatTensor(X_mark_dec_val),
+            torch.FloatTensor(y_val),
+            torch.FloatTensor(sd_val)
+        )
+        test_dataset = TensorDataset(
+            torch.FloatTensor(X_test),
+            torch.FloatTensor(X_mark_enc_test),
+            torch.FloatTensor(X_dec_test),
+            torch.FloatTensor(X_mark_dec_test),
+            torch.FloatTensor(y_test),
+            torch.FloatTensor(sd_test)
+        )
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
+        train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
+        test_loader = DataLoader(test_dataset, batch_size=args.batch_size)
 
-    print(f"训练集: {len(train_loader.dataset):,}, 验证集: {len(val_loader.dataset):,}, 测试集: {len(test_loader.dataset):,}")
+        print(f"训练集: {len(train_loader.dataset):,}, 验证集: {len(val_loader.dataset):,}, 测试集: {len(test_loader.dataset):,}")
     
     # ===== Step 4: 训练Informer =====
     print("\n" + "="*60)
@@ -1008,11 +1627,20 @@ def main():
     
     print(f"模型参数量: {sum(p.numel() for p in model.parameters()):,}")
     
-    trainer = InformerTrainer(model, device, lr=args.lr)
+    # 初始化训练器
+    steps_per_epoch = len(train_loader) if args.scheduler == 'onecycle' else None
+    trainer = InformerTrainer(
+        model, device, lr=args.lr, 
+        scheduler_type=args.scheduler, 
+        epochs=args.epochs,
+        steps_per_epoch=steps_per_epoch
+    )
+    
+    model_path = os.path.join(args.output_dir, 'best_informer.pth')
+    checkpoint_path = os.path.join(args.output_dir, 'checkpoint.pth')
     
     # 如果是eval_only模式，直接加载模型跳过训练
     if args.eval_only:
-        model_path = os.path.join(args.output_dir, 'best_informer.pth')
         if os.path.exists(model_path):
             print(f"加载已有模型: {model_path}")
             trainer.load(model_path)
@@ -1020,22 +1648,38 @@ def main():
             print(f"错误: 模型文件不存在 {model_path}")
             return
     else:
+        start_epoch = 0
         best_val_loss = float('inf')
-        for epoch in range(args.epochs):
+        
+        # 从checkpoint继续训练
+        if args.resume and os.path.exists(checkpoint_path):
+            print(f"从checkpoint继续训练: {checkpoint_path}")
+            start_epoch = trainer.load_checkpoint(checkpoint_path)
+            best_val_loss = trainer.best_val_loss
+        elif args.resume:
+            print("未找到checkpoint，从头开始训练")
+        
+        print(f"\n使用学习率调度器: {args.scheduler}")
+        print(f"初始学习率: {args.lr:.2e}")
+        
+        for epoch in range(start_epoch, args.epochs):
             train_loss = trainer.train_epoch(train_loader)
             val_loss = trainer.validate(val_loader)
-            trainer.scheduler.step(val_loss)
+            trainer.step_scheduler(val_loss)
             
             lr = trainer.optimizer.param_groups[0]['lr']
             print(f"Epoch {epoch+1}/{args.epochs}: Train={train_loss:.4f}, Val={val_loss:.4f}, LR={lr:.2e}")
             
+            # 保存检查点（用于继续训练）
+            trainer.save_checkpoint(checkpoint_path, epoch, min(val_loss, best_val_loss))
+            
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
-                trainer.save(os.path.join(args.output_dir, 'best_informer.pth'))
+                trainer.save(model_path)
                 print("  -> 保存最佳模型!")
         
         # 训练后加载最佳模型
-        trainer.load(os.path.join(args.output_dir, 'best_informer.pth'))
+        trainer.load(model_path)
     
     # ===== Step 5: 评估 =====
     print("\n" + "="*60)
@@ -1066,6 +1710,9 @@ def main():
     # 先绘制单模型结果
     plot_results(y_pred_sailing, y_true, pred_sd, args.output_dir, 
                  suffix='_sailing', title_prefix='单模型(仅航行) ')
+    
+    # 分析单模型 Bad Cases (仅在eval时)
+    analyze_bad_cases(y_pred_sailing, y_true, X_test, test_meta, dataset, args.output_dir, suffix='_sailing')
     
     if port_model_exists and os.path.exists(stop_path):
         print("\n【双模型评估】")
@@ -1169,6 +1816,9 @@ def main():
                 # 绘制双模型结果
                 plot_results(y_pred_total, y_true, pred_sd, args.output_dir,
                              suffix='_total', title_prefix='双模型(航行+停靠) ')
+                
+                # 分析双模型 Bad Cases
+                analyze_bad_cases(y_pred_total, y_true, X_test, test_meta, dataset, args.output_dir, suffix='_total')
                 
                 y_pred = y_pred_total
                 metrics = metrics_total
