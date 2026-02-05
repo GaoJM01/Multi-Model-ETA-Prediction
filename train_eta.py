@@ -117,6 +117,53 @@ def _compute_geom_features(group: pd.DataFrame) -> pd.DataFrame:
     group = group.copy()
     group['dist_to_dest_km'] = dist_km
     group['bearing_diff'] = bearing_diff
+    
+    # === 航速增强特征 ===
+    sog = group['sog'].values.astype(np.float32)
+    n = len(sog)
+    
+    # 1. 历史累积平均航速（从航程开始到当前时刻）
+    sog_cumsum = np.cumsum(sog)
+    sog_hist_mean = sog_cumsum / np.arange(1, n + 1)
+    
+    # 2. 历史航速标准差（滑动计算）
+    sog_hist_std = np.zeros(n, dtype=np.float32)
+    for i in range(1, n):
+        sog_hist_std[i] = np.std(sog[:i+1]) if i > 0 else 0.0
+    
+    # 3. 当前航速与历史均值的偏差比（异常检测）
+    # sog_deviation > 1 表示当前比历史快，< 1 表示比历史慢
+    sog_deviation = np.ones(n, dtype=np.float32)
+    mask = sog_hist_mean > 0.5  # 避免除零
+    sog_deviation[mask] = sog[mask] / sog_hist_mean[mask]
+    sog_deviation = np.clip(sog_deviation, 0.1, 3.0)  # 限制范围
+    
+    # 4. 航程进度（已航行时间 / 总航程时间估计）
+    # 使用 remaining_hours 来计算进度
+    if 'remaining_hours' in group.columns:
+        total_hours = group['remaining_hours'].iloc[0]  # 航程开始时的remaining_hours即为总时长
+        if total_hours > 0:
+            voyage_progress = 1.0 - (group['remaining_hours'].values / total_hours)
+            voyage_progress = np.clip(voyage_progress, 0.0, 1.0)
+        else:
+            voyage_progress = np.zeros(n, dtype=np.float32)
+    else:
+        voyage_progress = np.zeros(n, dtype=np.float32)
+    
+    # 5. 短期航速均值（最近5个点）- 平滑当前航速
+    window = 5
+    sog_short_avg = np.convolve(sog, np.ones(window)/window, mode='same')
+    # 边界处理
+    for i in range(window // 2):
+        sog_short_avg[i] = np.mean(sog[:i+1])
+        sog_short_avg[n-1-i] = np.mean(sog[n-1-i:])
+    
+    group['sog_hist_mean'] = sog_hist_mean.astype(np.float32)
+    group['sog_hist_std'] = sog_hist_std.astype(np.float32)
+    group['sog_deviation'] = sog_deviation.astype(np.float32)
+    group['voyage_progress'] = voyage_progress.astype(np.float32)
+    group['sog_short_avg'] = sog_short_avg.astype(np.float32)
+    
     return group
 
 
@@ -156,8 +203,12 @@ class MemmapDataset(torch.utils.data.Dataset):
         )
 
 
-def create_memmap_arrays(cache_dir: Path, n_samples: int, seq_len: int, label_len: int, pred_len: int, n_features: int = 6, prefix: str = 'train'):
-    """创建memmap数组用于增量写入序列"""
+def create_memmap_arrays(cache_dir: Path, n_samples: int, seq_len: int, label_len: int, pred_len: int, n_features: int = 11, prefix: str = 'train'):
+    """创建memmap数组用于增量写入序列
+    
+    n_features = 11: lat, lon, sog, cog, dist_to_dest_km, bearing_diff,
+                     sog_hist_mean, sog_hist_std, sog_deviation, voyage_progress, sog_short_avg
+    """
     dec_len = label_len + pred_len
     
     X = np.lib.format.open_memmap(
@@ -447,8 +498,11 @@ class VoyageETADataset:
         1. 先统计总序列数，预分配数组
         2. 使用float32减少内存
         3. 分层采样：确保高remaining_hours样本被充分采样
+        4. 航速增强特征：历史均值、标准差、偏差比、航程进度、短期均值
         """
-        feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff']
+        # 原始6个特征 + 5个航速增强特征 = 11个特征
+        feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff',
+                        'sog_hist_mean', 'sog_hist_std', 'sog_deviation', 'voyage_progress', 'sog_short_avg']
         group_col = 'voyage_id' if 'voyage_id' in voyage_df.columns else 'mmsi'
         
         # 第一遍：统计每个航程可产生的序列数
@@ -529,18 +583,8 @@ class VoyageETADataset:
             n_to_sample = samples_per_voyage[vid_idx]
             
             group = group.sort_values('postime')
-            # 目的地（航程终点）
-            dest_lat = group['lat'].iloc[-1]
-            dest_lon = group['lon'].iloc[-1]
-
-            # 计算几何特征
-            dist_km = self._haversine_km(group['lat'].values, group['lon'].values, dest_lat, dest_lon)
-            bearing_to_dest = self._bearing_deg(group['lat'].values, group['lon'].values, dest_lat, dest_lon)
-            bearing_diff = np.abs(((bearing_to_dest - group['cog'].values + 180) % 360) - 180)
-
-            group = group.copy()
-            group['dist_to_dest_km'] = dist_km
-            group['bearing_diff'] = bearing_diff
+            # 使用统一的几何特征计算函数（包含航速增强特征）
+            group = _compute_geom_features(group)
 
             features = group[feature_cols].values.astype(np.float32)
             targets = group['remaining_hours'].values.astype(np.float32)
@@ -851,7 +895,9 @@ def analyze_bad_cases(y_pred, y_true, X_input, test_meta, dataset, save_dir, thr
     last_step_features = X_input[bad_indices, -1, :]
     raw_features = dataset.inverse_normalize_features(last_step_features)
     
-    feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff']
+    # 11个特征: 原始6个 + 5个航速增强特征
+    feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff',
+                    'sog_hist_mean', 'sog_hist_std', 'sog_deviation', 'voyage_progress', 'sog_short_avg']
     
     records = []
     for i, idx in enumerate(bad_indices):
@@ -1341,7 +1387,9 @@ def main():
             feat_min = None
             feat_max = None
             count, mean, m2 = 0, 0.0, 0.0
-            feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff']
+            # 11个特征: 原始6个 + 5个航速增强特征
+            feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff',
+                            'sog_hist_mean', 'sog_hist_std', 'sog_deviation', 'voyage_progress', 'sog_short_avg']
             for bf in bucket_files:
                 df_bucket = pd.read_pickle(bf)
                 df_bucket = df_bucket[df_bucket['voyage_id'].isin(train_ids)]
@@ -1615,8 +1663,11 @@ def main():
     print("Step 4: 训练Informer模型")
     print("="*60)
     
+    # 11个特征: lat, lon, sog, cog, dist_to_dest_km, bearing_diff,
+    #           sog_hist_mean, sog_hist_std, sog_deviation, voyage_progress, sog_short_avg
+    n_features = 11
     model = Informer(
-        enc_in=6, dec_in=6, c_out=1,
+        enc_in=n_features, dec_in=n_features, c_out=1,
         seq_len=args.seq_len, label_len=args.label_len, pred_len=args.pred_len,
         d_model=args.d_model, n_heads=args.n_heads,
         e_layers=args.e_layers, d_layers=args.d_layers,
