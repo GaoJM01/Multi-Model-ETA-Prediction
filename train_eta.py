@@ -1894,6 +1894,20 @@ def main():
     print("\n【最终ETA计算方式】")
     print("  最终ETA = Informer预测的航行时间 + 港口停靠时间模型预测的停靠时间")
 
+    # Discord webhook 通知
+    try:
+        import urllib.request, json
+        webhook_url = "https://discord.com/api/webhooks/1477180434474336266/HQSS_BKlo1Ib-rzwItazg8ay0To2l-GR1GprnTvlPVpLxCxD9xu6_iEPsD9aBd4iHNgX"
+        msg_lines = [f"**ETA训练完成** ✅", f"时间: {datetime.now().isoformat()}"]
+        for name, value in metrics.items():
+            msg_lines.append(f"  {name}: {value:.4f}")
+        payload = json.dumps({"content": "\n".join(msg_lines)}).encode('utf-8')
+        req = urllib.request.Request(webhook_url, data=payload, headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10)
+        print("Discord 通知已发送")
+    except Exception as e:
+        print(f"Discord 通知发送失败: {e}")
+
 
 if __name__ == '__main__':
     main()
