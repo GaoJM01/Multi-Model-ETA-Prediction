@@ -1011,20 +1011,20 @@ def main():
     parser.add_argument('--processed_dir', type=str, default='./output/processed')
     
     # 模型参数
-    parser.add_argument('--seq_len', type=int, default=48)
-    parser.add_argument('--label_len', type=int, default=24)
+    parser.add_argument('--seq_len', type=int, default=96)
+    parser.add_argument('--label_len', type=int, default=48)
     parser.add_argument('--pred_len', type=int, default=1)
-    parser.add_argument('--d_model', type=int, default=512)
-    parser.add_argument('--n_heads', type=int, default=8)
-    parser.add_argument('--e_layers', type=int, default=2)
-    parser.add_argument('--d_layers', type=int, default=1)
-    parser.add_argument('--d_ff', type=int, default=2048)
+    parser.add_argument('--d_model', type=int, default=768)
+    parser.add_argument('--n_heads', type=int, default=12)
+    parser.add_argument('--e_layers', type=int, default=4)
+    parser.add_argument('--d_layers', type=int, default=2)
+    parser.add_argument('--d_ff', type=int, default=3072)
     parser.add_argument('--dropout', type=float, default=0.05)
     
     # 训练参数
-    parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--epochs', type=int, default=3)
-    parser.add_argument('--lr', type=float, default=5e-6)
+    parser.add_argument('--batch_size', type=int, default=256)
+    parser.add_argument('--epochs', type=int, default=5)
+    parser.add_argument('--lr', type=float, default=3e-4)
     parser.add_argument('--scheduler', type=str, default='plateau', 
                         choices=['plateau', 'cosine', 'cosine_restart', 'onecycle'],
                         help='学习率调度器: plateau(默认), cosine, cosine_restart, onecycle')
