@@ -734,7 +734,7 @@ class InformerTrainer:
         
         # 根据类型选择学习率调度器
         if scheduler_type == 'plateau':
-            self.scheduler = ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=3, verbose=True)
+            self.scheduler = ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=3)
         elif scheduler_type == 'cosine':
             self.scheduler = CosineAnnealingLR(self.optimizer, T_max=epochs, eta_min=lr * 0.01)
         elif scheduler_type == 'cosine_restart':
