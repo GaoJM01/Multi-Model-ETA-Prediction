@@ -975,10 +975,10 @@ def main():
     parser.add_argument('--dropout', type=float, default=0.05)
     
     # 训练参数
-    parser.add_argument('--batch_size', type=int, default=256)
-    parser.add_argument('--num_workers', type=int, default=8, help='DataLoader并行加载线程数')
+    parser.add_argument('--batch_size', type=int, default=4096)
+    parser.add_argument('--num_workers', type=int, default=16, help='DataLoader并行加载线程数')
     parser.add_argument('--epochs', type=int, default=10)
-    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--lr', type=float, default=4e-4)
     parser.add_argument('--scheduler', type=str, default='plateau', 
                         choices=['plateau', 'cosine', 'cosine_restart', 'onecycle'],
                         help='学习率调度器: plateau(默认), cosine, cosine_restart, onecycle')
