@@ -118,6 +118,20 @@ def _compute_geom_features(group: pd.DataFrame) -> pd.DataFrame:
     group['dist_to_dest_km'] = dist_km
     group['bearing_diff'] = bearing_diff
     
+    # naive_eta_hours: 用当前速度估算的到达时间
+    sog_knots = group['sog'].values.copy()
+    sog_knots = np.maximum(sog_knots, 0.5)  # 下限0.5避免除零
+    sog_kmh = sog_knots * 1.852  # knots → km/h
+    group['naive_eta_hours'] = dist_km / sog_kmh
+    
+    # cum_dist_km: 累计航行距离
+    lats = group['lat'].values
+    lons = group['lon'].values
+    step_dist = np.zeros(len(lats), dtype=np.float32)
+    if len(lats) > 1:
+        step_dist[1:] = VoyageETADataset._haversine_km(lats[:-1], lons[:-1], lats[1:], lons[1:])
+    group['cum_dist_km'] = np.cumsum(step_dist)
+    
     return group
 
 
@@ -158,10 +172,11 @@ class MemmapDataset(torch.utils.data.Dataset):
         )
 
 
-def create_memmap_arrays(cache_dir: Path, n_samples: int, seq_len: int, label_len: int, pred_len: int, n_features: int = 6, prefix: str = 'train'):
+def create_memmap_arrays(cache_dir: Path, n_samples: int, seq_len: int, label_len: int, pred_len: int, n_features: int = 8, n_time_features: int = 6, prefix: str = 'train'):
     """创建memmap数组用于增量写入序列
     
-    n_features = 6: lat, lon, sog, cog, dist_to_dest_km, bearing_diff
+    n_features = 8: lat, lon, sog, cog, dist_to_dest_km, bearing_diff, naive_eta_hours, cum_dist_km
+    n_time_features = 6: month_sin, month_cos, weekday_sin, weekday_cos, hour_sin, hour_cos
     """
     dec_len = label_len + pred_len
     
@@ -169,13 +184,13 @@ def create_memmap_arrays(cache_dir: Path, n_samples: int, seq_len: int, label_le
         cache_dir / f"X_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples, seq_len, n_features)
     )
     X_mark_enc = np.lib.format.open_memmap(
-        cache_dir / f"X_mark_enc_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples, seq_len, 5)
+        cache_dir / f"X_mark_enc_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples, seq_len, n_time_features)
     )
     X_dec = np.lib.format.open_memmap(
         cache_dir / f"X_dec_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples, dec_len, n_features)
     )
     X_mark_dec = np.lib.format.open_memmap(
-        cache_dir / f"X_mark_dec_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples, dec_len, 5)
+        cache_dir / f"X_mark_dec_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples, dec_len, n_time_features)
     )
     y = np.lib.format.open_memmap(
         cache_dir / f"y_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples,)
@@ -455,8 +470,8 @@ class VoyageETADataset:
         2. 使用float32减少内存
         3. 分层采样：确保高remaining_hours样本被充分采样
         """
-        # 原始6个特征
-        feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff']
+        # 8个特征
+        feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff', 'naive_eta_hours', 'cum_dist_km']
         group_col = 'voyage_id' if 'voyage_id' in voyage_df.columns else 'mmsi'
         
         # 第一遍：统计每个航程可产生的序列数
@@ -517,8 +532,8 @@ class VoyageETADataset:
         
         # 预分配数组（float32节省内存）
         X = np.zeros((actual_total, self.seq_len, len(feature_cols)), dtype=np.float32)
-        X_mark_enc = np.zeros((actual_total, self.seq_len, 5), dtype=np.float32)
-        X_mark_dec = np.zeros((actual_total, self.label_len + self.pred_len, 5), dtype=np.float32)
+        X_mark_enc = np.zeros((actual_total, self.seq_len, 6), dtype=np.float32)
+        X_mark_dec = np.zeros((actual_total, self.label_len + self.pred_len, 6), dtype=np.float32)
         y = np.zeros(actual_total, dtype=np.float32)
         sailing_days = np.zeros(actual_total, dtype=np.float32)
         meta_mmsi = np.zeros(actual_total, dtype=np.int64)
@@ -547,13 +562,14 @@ class VoyageETADataset:
             first_time = postime.iloc[0]
             sd_values = ((postime - first_time).dt.total_seconds() / 86400).values.astype(np.float32)
             
-            # 时间特征
+            # 时间特征: sin/cos编码 (6维)
             time_marks = np.stack([
-                postime.dt.month.values / 12,
-                postime.dt.day.values / 31,
-                postime.dt.weekday.values / 7,
-                postime.dt.hour.values / 24,
-                postime.dt.minute.values / 60
+                np.sin(2 * np.pi * postime.dt.month.values / 12),
+                np.cos(2 * np.pi * postime.dt.month.values / 12),
+                np.sin(2 * np.pi * postime.dt.weekday.values / 7),
+                np.cos(2 * np.pi * postime.dt.weekday.values / 7),
+                np.sin(2 * np.pi * postime.dt.hour.values / 24),
+                np.cos(2 * np.pi * postime.dt.hour.values / 24),
             ], axis=1).astype(np.float32)
             
             # 可用的起始位置
@@ -857,8 +873,8 @@ def analyze_bad_cases(y_pred, y_true, X_input, test_meta, dataset, save_dir, thr
     last_step_features = X_input[bad_indices, -1, :]
     raw_features = dataset.inverse_normalize_features(last_step_features)
     
-    # 6个特征
-    feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff']
+    # 8个特征
+    feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff', 'naive_eta_hours', 'cum_dist_km']
     
     records = []
     for i, idx in enumerate(bad_indices):
@@ -971,21 +987,21 @@ def main():
     parser.add_argument('--processed_dir', type=str, default='./output/processed')
     
     # 模型参数
-    parser.add_argument('--seq_len', type=int, default=48)
-    parser.add_argument('--label_len', type=int, default=24)
+    parser.add_argument('--seq_len', type=int, default=64)
+    parser.add_argument('--label_len', type=int, default=32)
     parser.add_argument('--pred_len', type=int, default=1)
-    parser.add_argument('--d_model', type=int, default=768)
+    parser.add_argument('--d_model', type=int, default=512)
     parser.add_argument('--n_heads', type=int, default=8)
-    parser.add_argument('--e_layers', type=int, default=3)
-    parser.add_argument('--d_layers', type=int, default=2)
-    parser.add_argument('--d_ff', type=int, default=3072)
-    parser.add_argument('--dropout', type=float, default=0.08)
+    parser.add_argument('--e_layers', type=int, default=2)
+    parser.add_argument('--d_layers', type=int, default=1)
+    parser.add_argument('--d_ff', type=int, default=2048)
+    parser.add_argument('--dropout', type=float, default=0.05)
     
     # 训练参数
     parser.add_argument('--batch_size', type=int, default=4096)
     parser.add_argument('--num_workers', type=int, default=16, help='DataLoader并行加载线程数')
-    parser.add_argument('--epochs', type=int, default=15)
-    parser.add_argument('--lr', type=float, default=5e-4)
+    parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--lr', type=float, default=4e-4)
     parser.add_argument('--scheduler', type=str, default='cosine_warmup', 
                         choices=['plateau', 'cosine', 'cosine_warmup', 'cosine_restart', 'onecycle'],
                         help='学习率调度器: plateau, cosine, cosine_warmup(默认,warmup+cosine), cosine_restart, onecycle')
@@ -1001,7 +1017,7 @@ def main():
     parser.add_argument('--use_cache', action='store_true', default=True, help='使用缓存的预处理数据')
     parser.add_argument('--max_files', type=int, default=None, help='处理文件数限制')
     parser.add_argument('--max_voyages', type=int, default=150000, help='最多使用的航程数（控制内存）')
-    parser.add_argument('--max_sequences', type=int, default=50000000, help='最多生成的训练序列数')
+    parser.add_argument('--max_sequences', type=int, default=75000000, help='最多生成的训练序列数')
     parser.add_argument('--max_seqs_per_bucket', type=int, default=500000, help='每个bucket最多处理的序列数（控制内存峰值）')
     parser.add_argument('--eval_only', action='store_true', help='仅评估和重绘图（跳过训练）')
     parser.add_argument('--step3_workers', type=int, default=os.cpu_count(), help='Step3并行工作进程数')
@@ -1362,8 +1378,8 @@ def main():
             feat_min = None
             feat_max = None
             count, mean, m2 = 0, 0.0, 0.0
-            # 6个特征
-            feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff']
+            # 8个特征
+            feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff', 'naive_eta_hours', 'cum_dist_km']
             for bf in bucket_files:
                 df_bucket = pd.read_pickle(bf)
                 df_bucket = df_bucket[df_bucket['voyage_id'].isin(train_ids)]
@@ -1642,8 +1658,8 @@ def main():
     print("Step 4: 训练Informer模型")
     print("="*60)
     
-    # 6个特征: lat, lon, sog, cog, dist_to_dest_km, bearing_diff
-    n_features = 6
+    # 8个特征: lat, lon, sog, cog, dist_to_dest_km, bearing_diff, naive_eta_hours, cum_dist_km
+    n_features = 8
     model = Informer(
         enc_in=n_features, dec_in=n_features, c_out=1,
         seq_len=args.seq_len, label_len=args.label_len, pred_len=args.pred_len,

@@ -260,7 +260,7 @@ class TimeFeatureEmbedding(nn.Module):
         super(TimeFeatureEmbedding, self).__init__()
         
         # Determine number of features based on frequency
-        freq_map = {'t': 5, 'h': 4, 'd': 3, 'w': 2, 'm': 1}
+        freq_map = {'t': 6, 'h': 4, 'd': 3, 'w': 2, 'm': 1}
         d_inp = freq_map.get(freq, num_features)
         
         self.embed = nn.Linear(d_inp, d_model, bias=False)

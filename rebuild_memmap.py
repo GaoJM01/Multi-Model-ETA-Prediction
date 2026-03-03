@@ -33,11 +33,11 @@ from train_eta import (
 def main():
     parser = argparse.ArgumentParser(description="从spill桶重建memmap缓存")
     parser.add_argument('--output_dir', type=str, default='./output')
-    parser.add_argument('--seq_len', type=int, default=48)
-    parser.add_argument('--label_len', type=int, default=24)
+    parser.add_argument('--seq_len', type=int, default=64)
+    parser.add_argument('--label_len', type=int, default=32)
     parser.add_argument('--pred_len', type=int, default=1)
     parser.add_argument('--max_voyages', type=int, default=150000)
-    parser.add_argument('--max_sequences', type=int, default=50000000)
+    parser.add_argument('--max_sequences', type=int, default=75000000)
     parser.add_argument('--max_seqs_per_bucket', type=int, default=500000)
     parser.add_argument('--new_ratio', type=float, default=2.0,
                         help='data_new : old 的目标比例 (default: 2.0，即 new 是 old 的 2 倍)')
@@ -98,7 +98,7 @@ def main():
     # ========== Pass A: 归一化参数（流式） ==========
     print("\n=== Pass A: 统计归一化参数 ===")
     dataset = VoyageETADataset(seq_len=args.seq_len, label_len=args.label_len, pred_len=args.pred_len)
-    feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff']
+    feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff', 'naive_eta_hours', 'cum_dist_km']
 
     feat_min = None
     feat_max = None
@@ -298,7 +298,7 @@ def main():
     print(f"\n=== 完成 ===")
     print(f"最终序列: train={idxs['train']:,}, val={idxs['val']:,}, test={idxs['test']:,}")
     print(f"缓存目录: {cache_dir}")
-    print(f"\n下一步: python train_eta.py --use_cache --scheduler cosine --max_voyages {args.max_voyages} --max_sequences {args.max_sequences}")
+    print(f"\n下一步: python train_eta.py --use_cache --max_voyages {args.max_voyages} --max_sequences {args.max_sequences}")
 
 
 if __name__ == '__main__':
