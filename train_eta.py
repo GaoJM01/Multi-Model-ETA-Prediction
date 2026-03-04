@@ -38,7 +38,7 @@ from collections import deque
 import torch
 import torch.nn as nn
 from torch.optim import Adam, AdamW
-from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR, CosineAnnealingWarmRestarts, OneCycleLR, SequentialLR, LinearLR
+from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR, CosineAnnealingWarmRestarts, OneCycleLR
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 
@@ -118,20 +118,6 @@ def _compute_geom_features(group: pd.DataFrame) -> pd.DataFrame:
     group['dist_to_dest_km'] = dist_km
     group['bearing_diff'] = bearing_diff
     
-    # naive_eta_hours: 用当前速度估算的到达时间
-    sog_knots = group['sog'].values.copy()
-    sog_knots = np.maximum(sog_knots, 0.5)  # 下限0.5避免除零
-    sog_kmh = sog_knots * 1.852  # knots → km/h
-    group['naive_eta_hours'] = dist_km / sog_kmh
-    
-    # cum_dist_km: 累计航行距离
-    lats = group['lat'].values
-    lons = group['lon'].values
-    step_dist = np.zeros(len(lats), dtype=np.float32)
-    if len(lats) > 1:
-        step_dist[1:] = VoyageETADataset._haversine_km(lats[:-1], lons[:-1], lats[1:], lons[1:])
-    group['cum_dist_km'] = np.cumsum(step_dist)
-    
     return group
 
 
@@ -172,11 +158,10 @@ class MemmapDataset(torch.utils.data.Dataset):
         )
 
 
-def create_memmap_arrays(cache_dir: Path, n_samples: int, seq_len: int, label_len: int, pred_len: int, n_features: int = 8, n_time_features: int = 6, prefix: str = 'train'):
+def create_memmap_arrays(cache_dir: Path, n_samples: int, seq_len: int, label_len: int, pred_len: int, n_features: int = 6, prefix: str = 'train'):
     """创建memmap数组用于增量写入序列
     
-    n_features = 8: lat, lon, sog, cog, dist_to_dest_km, bearing_diff, naive_eta_hours, cum_dist_km
-    n_time_features = 6: month_sin, month_cos, weekday_sin, weekday_cos, hour_sin, hour_cos
+    n_features = 6: lat, lon, sog, cog, dist_to_dest_km, bearing_diff
     """
     dec_len = label_len + pred_len
     
@@ -184,13 +169,13 @@ def create_memmap_arrays(cache_dir: Path, n_samples: int, seq_len: int, label_le
         cache_dir / f"X_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples, seq_len, n_features)
     )
     X_mark_enc = np.lib.format.open_memmap(
-        cache_dir / f"X_mark_enc_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples, seq_len, n_time_features)
+        cache_dir / f"X_mark_enc_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples, seq_len, 5)
     )
     X_dec = np.lib.format.open_memmap(
         cache_dir / f"X_dec_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples, dec_len, n_features)
     )
     X_mark_dec = np.lib.format.open_memmap(
-        cache_dir / f"X_mark_dec_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples, dec_len, n_time_features)
+        cache_dir / f"X_mark_dec_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples, dec_len, 5)
     )
     y = np.lib.format.open_memmap(
         cache_dir / f"y_{prefix}.npy", mode='w+', dtype=np.float32, shape=(n_samples,)
@@ -470,8 +455,8 @@ class VoyageETADataset:
         2. 使用float32减少内存
         3. 分层采样：确保高remaining_hours样本被充分采样
         """
-        # 8个特征
-        feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff', 'naive_eta_hours', 'cum_dist_km']
+        # 原始6个特征
+        feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff']
         group_col = 'voyage_id' if 'voyage_id' in voyage_df.columns else 'mmsi'
         
         # 第一遍：统计每个航程可产生的序列数
@@ -532,8 +517,8 @@ class VoyageETADataset:
         
         # 预分配数组（float32节省内存）
         X = np.zeros((actual_total, self.seq_len, len(feature_cols)), dtype=np.float32)
-        X_mark_enc = np.zeros((actual_total, self.seq_len, 6), dtype=np.float32)
-        X_mark_dec = np.zeros((actual_total, self.label_len + self.pred_len, 6), dtype=np.float32)
+        X_mark_enc = np.zeros((actual_total, self.seq_len, 5), dtype=np.float32)
+        X_mark_dec = np.zeros((actual_total, self.label_len + self.pred_len, 5), dtype=np.float32)
         y = np.zeros(actual_total, dtype=np.float32)
         sailing_days = np.zeros(actual_total, dtype=np.float32)
         meta_mmsi = np.zeros(actual_total, dtype=np.int64)
@@ -562,14 +547,13 @@ class VoyageETADataset:
             first_time = postime.iloc[0]
             sd_values = ((postime - first_time).dt.total_seconds() / 86400).values.astype(np.float32)
             
-            # 时间特征: sin/cos编码 (6维)
+            # 时间特征
             time_marks = np.stack([
-                np.sin(2 * np.pi * postime.dt.month.values / 12),
-                np.cos(2 * np.pi * postime.dt.month.values / 12),
-                np.sin(2 * np.pi * postime.dt.weekday.values / 7),
-                np.cos(2 * np.pi * postime.dt.weekday.values / 7),
-                np.sin(2 * np.pi * postime.dt.hour.values / 24),
-                np.cos(2 * np.pi * postime.dt.hour.values / 24),
+                postime.dt.month.values / 12,
+                postime.dt.day.values / 31,
+                postime.dt.weekday.values / 7,
+                postime.dt.hour.values / 24,
+                postime.dt.minute.values / 60
             ], axis=1).astype(np.float32)
             
             # 可用的起始位置
@@ -690,13 +674,12 @@ class InformerTrainer:
             scheduler_type: 学习率调度器类型
                 - 'plateau': ReduceLROnPlateau (验证损失不下降时降低LR)
                 - 'cosine': CosineAnnealingLR (余弦退火)
-                - 'cosine_warmup': 线性warmup(1 epoch) + CosineAnnealingLR
                 - 'cosine_restart': CosineAnnealingWarmRestarts (带热重启的余弦退火)
                 - 'onecycle': OneCycleLR (一周期策略，自动找最佳LR)
         """
         self.model = model.to(device)
         self.device = device
-        self.criterion = nn.SmoothL1Loss(beta=0.5)
+        self.criterion = nn.HuberLoss(delta=1.0)
         self.optimizer = AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
         self.scheduler_type = scheduler_type
         self.start_epoch = 0
@@ -707,11 +690,6 @@ class InformerTrainer:
             self.scheduler = ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=3)
         elif scheduler_type == 'cosine':
             self.scheduler = CosineAnnealingLR(self.optimizer, T_max=epochs, eta_min=lr * 0.01)
-        elif scheduler_type == 'cosine_warmup':
-            # 线性warmup 1 epoch，然后cosine退火剩余epoch
-            warmup_scheduler = LinearLR(self.optimizer, start_factor=0.1, total_iters=1)
-            cosine_scheduler = CosineAnnealingLR(self.optimizer, T_max=max(1, epochs - 1), eta_min=lr * 0.01)
-            self.scheduler = SequentialLR(self.optimizer, schedulers=[warmup_scheduler, cosine_scheduler], milestones=[1])
         elif scheduler_type == 'cosine_restart':
             self.scheduler = CosineAnnealingWarmRestarts(self.optimizer, T_0=max(1, epochs // 3), T_mult=2, eta_min=lr * 0.01)
         elif scheduler_type == 'onecycle':
@@ -800,8 +778,6 @@ class InformerTrainer:
             self.scheduler.step(val_loss)
         elif self.scheduler_type == 'onecycle':
             pass  # OneCycleLR在train_epoch中每个batch后更新
-        elif self.scheduler_type in ('cosine', 'cosine_warmup', 'cosine_restart'):
-            self.scheduler.step()
         else:
             self.scheduler.step()
     
@@ -873,8 +849,9 @@ def analyze_bad_cases(y_pred, y_true, X_input, test_meta, dataset, save_dir, thr
     last_step_features = X_input[bad_indices, -1, :]
     raw_features = dataset.inverse_normalize_features(last_step_features)
     
-    # 8个特征
-    feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff', 'naive_eta_hours', 'cum_dist_km']
+    # 11个特征: 原始6个 + 5个航速增强特征
+    feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff',
+                    'sog_hist_mean', 'sog_hist_std', 'sog_deviation', 'voyage_progress', 'sog_short_avg']
     
     records = []
     for i, idx in enumerate(bad_indices):
@@ -1002,10 +979,10 @@ def main():
     parser.add_argument('--num_workers', type=int, default=16, help='DataLoader并行加载线程数')
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--lr', type=float, default=4e-4)
-    parser.add_argument('--scheduler', type=str, default='cosine_warmup', 
-                        choices=['plateau', 'cosine', 'cosine_warmup', 'cosine_restart', 'onecycle'],
-                        help='学习率调度器: plateau, cosine, cosine_warmup(默认,warmup+cosine), cosine_restart, onecycle')
-    parser.add_argument('--early_stopping_patience', type=int, default=5,
+    parser.add_argument('--scheduler', type=str, default='plateau', 
+                        choices=['plateau', 'cosine', 'cosine_restart', 'onecycle'],
+                        help='学习率调度器: plateau(默认), cosine, cosine_restart, onecycle')
+    parser.add_argument('--early_stopping_patience', type=int, default=3,
                         help='验证损失连续N个epoch未改善则停止训练（0=禁用）')
     parser.add_argument('--resume', action='store_true', help='从checkpoint继续训练')
     
@@ -1017,7 +994,7 @@ def main():
     parser.add_argument('--use_cache', action='store_true', default=True, help='使用缓存的预处理数据')
     parser.add_argument('--max_files', type=int, default=None, help='处理文件数限制')
     parser.add_argument('--max_voyages', type=int, default=150000, help='最多使用的航程数（控制内存）')
-    parser.add_argument('--max_sequences', type=int, default=75000000, help='最多生成的训练序列数')
+    parser.add_argument('--max_sequences', type=int, default=50000000, help='最多生成的训练序列数')
     parser.add_argument('--max_seqs_per_bucket', type=int, default=500000, help='每个bucket最多处理的序列数（控制内存峰值）')
     parser.add_argument('--eval_only', action='store_true', help='仅评估和重绘图（跳过训练）')
     parser.add_argument('--step3_workers', type=int, default=os.cpu_count(), help='Step3并行工作进程数')
@@ -1378,8 +1355,8 @@ def main():
             feat_min = None
             feat_max = None
             count, mean, m2 = 0, 0.0, 0.0
-            # 8个特征
-            feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff', 'naive_eta_hours', 'cum_dist_km']
+            # 6个特征
+            feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff']
             for bf in bucket_files:
                 df_bucket = pd.read_pickle(bf)
                 df_bucket = df_bucket[df_bucket['voyage_id'].isin(train_ids)]
@@ -1658,8 +1635,8 @@ def main():
     print("Step 4: 训练Informer模型")
     print("="*60)
     
-    # 8个特征: lat, lon, sog, cog, dist_to_dest_km, bearing_diff, naive_eta_hours, cum_dist_km
-    n_features = 8
+    # 6个特征: lat, lon, sog, cog, dist_to_dest_km, bearing_diff
+    n_features = 6
     model = Informer(
         enc_in=n_features, dec_in=n_features, c_out=1,
         seq_len=args.seq_len, label_len=args.label_len, pred_len=args.pred_len,
