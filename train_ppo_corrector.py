@@ -30,6 +30,7 @@ PPO 残差修正器 — 在冻结的 Informer 基模型上训练一个小型 Act
 
 import os
 import sys
+import gc
 import argparse
 import numpy as np
 from pathlib import Path
@@ -448,16 +449,30 @@ class PPOTrainer:
             'entropy': total_entropy / n_updates,
         }
     
-    def evaluate(self, loader, frozen_informer, deterministic=True):
-        """在 test/val 集上评估（deterministic=True 时使用 μ 不加噪声）"""
+    def evaluate(self, loader, frozen_informer, deterministic=True, batch_limit=None):
+        """在 test/val 集上评估（deterministic=True 时使用 μ 不加噪声）
+        
+        使用在线累积避免内存爆炸，batch_limit 可限制评估批数。
+        """
         self.ac.eval()
         
-        all_base_hours = []
-        all_corrected_hours = []
-        all_true_hours = []
-        all_corrections = []
+        # 在线累积统计量
+        n_total = 0
+        sum_base_ae = 0.0    # mean absolute error
+        sum_corr_ae = 0.0
+        sum_base_se = 0.0    # mean squared error
+        sum_corr_se = 0.0
+        sum_base_ape = 0.0   # MAPE numerator (>24h)
+        sum_corr_ape = 0.0
+        n_mape = 0
+        sum_corrections = 0.0
+        sum_corrections_sq = 0.0
+        sum_abs_corrections = 0.0
         
-        for batch in tqdm(loader, desc="Evaluating", leave=False):
+        for i, batch in enumerate(tqdm(loader, desc="Evaluating", leave=False)):
+            if batch_limit and i >= batch_limit:
+                break
+            
             x_enc, x_mark_enc, x_dec, x_mark_dec, y_norm, sd = batch
             
             x_enc_dev = x_enc.to(self.device)
@@ -487,26 +502,41 @@ class PPOTrainer:
             corrections = action.cpu().numpy()
             corrected = np.maximum(pred_hours + corrections, 0)
             
-            all_base_hours.append(pred_hours)
-            all_corrected_hours.append(corrected)
-            all_true_hours.append(true_hours)
-            all_corrections.append(corrections)
+            # 在线累积
+            B = len(true_hours)
+            n_total += B
+            
+            base_ae = np.abs(pred_hours - true_hours)
+            corr_ae = np.abs(corrected - true_hours)
+            sum_base_ae += base_ae.sum()
+            sum_corr_ae += corr_ae.sum()
+            sum_base_se += (base_ae ** 2).sum()
+            sum_corr_se += (corr_ae ** 2).sum()
+            
+            mask = true_hours > 24
+            if mask.sum() > 0:
+                sum_base_ape += (base_ae[mask] / true_hours[mask]).sum()
+                sum_corr_ape += (corr_ae[mask] / true_hours[mask]).sum()
+                n_mape += mask.sum()
+            
+            sum_corrections += corrections.sum()
+            sum_corrections_sq += (corrections ** 2).sum()
+            sum_abs_corrections += np.abs(corrections).sum()
+            
+            # 释放中间变量
+            del x_enc_dev, x_mark_enc_dev, x_dec_dev, x_mark_dec_dev
+            del state_t, action, pred_norm
+            if i % 100 == 0:
+                gc.collect()
         
-        base_hours = np.concatenate(all_base_hours)
-        corrected_hours = np.concatenate(all_corrected_hours)
-        true_hours = np.concatenate(all_true_hours)
-        corrections = np.concatenate(all_corrections)
-        
-        base_mae = np.mean(np.abs(base_hours - true_hours))
-        corrected_mae = np.mean(np.abs(corrected_hours - true_hours))
-        
-        base_rmse = np.sqrt(np.mean((base_hours - true_hours) ** 2))
-        corrected_rmse = np.sqrt(np.mean((corrected_hours - true_hours) ** 2))
-        
-        # MAPE (filter > 24h)
-        mask = true_hours > 24
-        base_mape = np.mean(np.abs((base_hours[mask] - true_hours[mask]) / true_hours[mask])) * 100 if mask.sum() > 0 else 0
-        corrected_mape = np.mean(np.abs((corrected_hours[mask] - true_hours[mask]) / true_hours[mask])) * 100 if mask.sum() > 0 else 0
+        base_mae = sum_base_ae / n_total
+        corrected_mae = sum_corr_ae / n_total
+        base_rmse = np.sqrt(sum_base_se / n_total)
+        corrected_rmse = np.sqrt(sum_corr_se / n_total)
+        base_mape = (sum_base_ape / n_mape * 100) if n_mape > 0 else 0
+        corrected_mape = (sum_corr_ape / n_mape * 100) if n_mape > 0 else 0
+        mean_corr = sum_corrections / n_total
+        std_corr = np.sqrt(sum_corrections_sq / n_total - mean_corr ** 2)
         
         return {
             'base_mae': base_mae,
@@ -515,9 +545,9 @@ class PPOTrainer:
             'corrected_rmse': corrected_rmse,
             'base_mape': base_mape,
             'corrected_mape': corrected_mape,
-            'mean_correction': np.mean(corrections),
-            'std_correction': np.std(corrections),
-            'median_abs_correction': np.median(np.abs(corrections)),
+            'mean_correction': mean_corr,
+            'std_correction': std_corr,
+            'median_abs_correction': sum_abs_corrections / n_total,  # 用 mean|δ| 近似
             'improvement': base_mae - corrected_mae,
         }
     
@@ -589,6 +619,9 @@ def main():
     parser.add_argument('--dropout', type=float, default=0.05)
     parser.add_argument('--max_sequences', type=int, default=50000000)
     
+    parser.add_argument('--eval_batches', type=int, default=500,
+                        help="验证/测试时评估多少批 (0=全量)")
+    
     # 模式
     parser.add_argument('--eval_only', action='store_true')
     parser.add_argument('--num_workers', type=int, default=4)
@@ -635,9 +668,11 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True,
                                num_workers=args.num_workers, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
-                             num_workers=args.num_workers, pin_memory=True)
+                             num_workers=min(args.num_workers, 2), pin_memory=True)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size,
-                              num_workers=args.num_workers, pin_memory=True)
+                              num_workers=min(args.num_workers, 2), pin_memory=True)
+    
+    eval_batch_limit = args.eval_batches if args.eval_batches > 0 else None
     
     print(f"Train: {len(train_dataset):,}, Val: {len(val_dataset):,}, Test: {len(test_dataset):,}")
     
@@ -669,7 +704,7 @@ def main():
             return
         
         print("\n=== 测试集评估 (deterministic) ===")
-        metrics = ppo.evaluate(test_loader, frozen_informer, deterministic=True)
+        metrics = ppo.evaluate(test_loader, frozen_informer, deterministic=True, batch_limit=eval_batch_limit)
         print(f"  Base MAE:      {metrics['base_mae']:.2f}h")
         print(f"  Corrected MAE: {metrics['corrected_mae']:.2f}h")
         print(f"  Improvement:   {metrics['improvement']:.2f}h")
@@ -719,8 +754,8 @@ def main():
               f"value_loss={update_info['value_loss']:.4f}, "
               f"entropy={update_info['entropy']:.4f}")
         
-        # 3. Validate
-        val_metrics = ppo.evaluate(val_loader, frozen_informer, deterministic=True)
+        # 3. Validate (用 batch_limit 加速)
+        val_metrics = ppo.evaluate(val_loader, frozen_informer, deterministic=True, batch_limit=eval_batch_limit)
         print(f"  Val: base_MAE={val_metrics['base_mae']:.2f}h, "
               f"corrected_MAE={val_metrics['corrected_mae']:.2f}h, "
               f"Δ={val_metrics['improvement']:+.2f}h")
@@ -743,7 +778,7 @@ def main():
     print(f"{'='*60}")
     
     ppo.load(corrector_path)
-    test_metrics = ppo.evaluate(test_loader, frozen_informer, deterministic=True)
+    test_metrics = ppo.evaluate(test_loader, frozen_informer, deterministic=True, batch_limit=eval_batch_limit)
     
     print(f"\n【测试集结果】")
     print(f"  Base Informer MAE:      {test_metrics['base_mae']:.2f}h")
