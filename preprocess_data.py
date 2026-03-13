@@ -58,7 +58,9 @@ class PortStop:
 # 核心处理函数
 # ============================================================
 
-REQUIRED_COLS = ['mmsi', 'postime', 'eta', 'lon', 'lat', 'sog', 'cog']
+REQUIRED_COLS = ['mmsi', 'postime', 'eta', 'lon', 'lat', 'sog', 'cog',
+                 'temp', 'wind_speed', 'wind_level', 'prmsl', 'visibility']
+WEATHER_COLS = ['temp', 'wind_speed', 'wind_level', 'prmsl', 'visibility']
 
 # 停靠速度阈值（节）
 STOP_SPEED_THRESHOLD = 0.3
@@ -95,6 +97,11 @@ def process_single_ship(ship_df: pd.DataFrame, mmsi: int) -> Tuple[List[pd.DataF
     
     ship_df = ship_df.sort_values('postime').copy()
     ship_df['postime'] = pd.to_datetime(ship_df['postime'])
+    
+    # 天气列NaN填充：前向填充 + 零填充兜底
+    weather_in_df = [c for c in WEATHER_COLS if c in ship_df.columns]
+    if weather_in_df:
+        ship_df[weather_in_df] = ship_df[weather_in_df].ffill().fillna(0)
     
     # 检查整体数据密度
     time_span = (ship_df['postime'].max() - ship_df['postime'].min()).total_seconds() / 86400

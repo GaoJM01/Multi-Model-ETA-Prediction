@@ -98,7 +98,8 @@ def main():
     # ========== Pass A: 归一化参数（流式） ==========
     print("\n=== Pass A: 统计归一化参数 ===")
     dataset = VoyageETADataset(seq_len=args.seq_len, label_len=args.label_len, pred_len=args.pred_len)
-    feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff']
+    feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff',
+                    'temp', 'wind_speed', 'wind_level', 'prmsl', 'visibility']
 
     feat_min = None
     feat_max = None
@@ -177,7 +178,7 @@ def main():
         n = target_counts[name]['total']
         arrays = create_memmap_arrays(cache_dir, n, args.seq_len, args.label_len, args.pred_len, prefix=name)
         memmaps[name] = arrays
-        size_gb = n * (args.seq_len * 6 + args.seq_len * 5 + 25 * 6 + 25 * 5 + 1 + 1) * 4 / 1e9
+        size_gb = n * (args.seq_len * 11 + args.seq_len * 5 + 25 * 11 + 25 * 5 + 1 + 1) * 4 / 1e9
         print(f"  {name}: {n:,} 序列, 预估 {size_gb:.1f} GB")
 
     # ========== Pass C: 生成序列（按比例写入 memmap） ==========

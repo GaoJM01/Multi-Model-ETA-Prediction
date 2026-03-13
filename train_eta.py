@@ -92,8 +92,14 @@ class AsymmetricHuberLoss(nn.Module):
         return weighted_loss.mean()
 
 
+WEATHER_COLS = ['temp', 'wind_speed', 'wind_level', 'prmsl', 'visibility']
+
 def _basic_filter_chunk(chunk: pd.DataFrame) -> pd.DataFrame:
     """Step 3: 基础过滤（降低内存/提升质量）"""
+    # 天气列允许缺失，先填充再dropna
+    weather_in_chunk = [c for c in WEATHER_COLS if c in chunk.columns]
+    if weather_in_chunk:
+        chunk[weather_in_chunk] = chunk[weather_in_chunk].fillna(0)
     chunk = chunk.dropna()
     chunk = chunk[(chunk['remaining_hours'] >= 0) & (chunk['remaining_hours'] <= 720)]
     chunk = chunk[(chunk['sog'] >= 0) & (chunk['sog'] <= 30)]
@@ -204,10 +210,10 @@ class MemmapDataset(torch.utils.data.Dataset):
         )
 
 
-def create_memmap_arrays(cache_dir: Path, n_samples: int, seq_len: int, label_len: int, pred_len: int, n_features: int = 6, prefix: str = 'train'):
+def create_memmap_arrays(cache_dir: Path, n_samples: int, seq_len: int, label_len: int, pred_len: int, n_features: int = 11, prefix: str = 'train'):
     """创建memmap数组用于增量写入序列
     
-    n_features = 6: lat, lon, sog, cog, dist_to_dest_km, bearing_diff
+    n_features = 11: lat, lon, sog, cog, dist_to_dest_km, bearing_diff, temp, wind_speed, wind_level, prmsl, visibility
     """
     dec_len = label_len + pred_len
     
@@ -501,8 +507,9 @@ class VoyageETADataset:
         2. 使用float32减少内存
         3. 分层采样：确保高remaining_hours样本被充分采样
         """
-        # 原始6个特征
-        feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff']
+        # 11个特征：6个基础 + 5个天气
+        feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff',
+                        'temp', 'wind_speed', 'wind_level', 'prmsl', 'visibility']
         group_col = 'voyage_id' if 'voyage_id' in voyage_df.columns else 'mmsi'
         
         # 第一遍：统计每个航程可产生的序列数
@@ -895,8 +902,9 @@ def analyze_bad_cases(y_pred, y_true, X_input, test_meta, dataset, save_dir, thr
     last_step_features = X_input[bad_indices, -1, :]
     raw_features = dataset.inverse_normalize_features(last_step_features)
     
-    # 6个特征
-    feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff']
+    # 11个特征：6个基础 + 5个天气
+    feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff',
+                    'temp', 'wind_speed', 'wind_level', 'prmsl', 'visibility']
     
     records = []
     for i, idx in enumerate(bad_indices):
@@ -1187,9 +1195,12 @@ def main():
     else:
         # 分块读取CSV，只加载需要的列，使用float32
         print("分块读取航程数据...")
-        use_cols = ['lat', 'lon', 'sog', 'cog', 'remaining_hours', 'mmsi', 'postime', 'voyage_id', 'voyage_duration_hours']
+        use_cols = ['lat', 'lon', 'sog', 'cog', 'remaining_hours', 'mmsi', 'postime', 'voyage_id', 'voyage_duration_hours',
+                    'temp', 'wind_speed', 'wind_level', 'prmsl', 'visibility']
         dtype = {'lat': 'float32', 'lon': 'float32', 'sog': 'float32', 'cog': 'float32', 
-                 'remaining_hours': 'float32', 'voyage_duration_hours': 'float32'}
+                 'remaining_hours': 'float32', 'voyage_duration_hours': 'float32',
+                 'temp': 'float32', 'wind_speed': 'float32', 'wind_level': 'float32',
+                 'prmsl': 'float32', 'visibility': 'float32'}
 
         chunk_size = args.step3_chunk_size
         num_workers = max(1, args.step3_workers or 1)
@@ -1400,8 +1411,9 @@ def main():
             feat_min = None
             feat_max = None
             count, mean, m2 = 0, 0.0, 0.0
-            # 6个特征
-            feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff']
+            # 11个特征：6个基础 + 5个天气
+            feature_cols = ['lat', 'lon', 'sog', 'cog', 'dist_to_dest_km', 'bearing_diff',
+                            'temp', 'wind_speed', 'wind_level', 'prmsl', 'visibility']
             for bf in bucket_files:
                 df_bucket = pd.read_pickle(bf)
                 df_bucket = df_bucket[df_bucket['voyage_id'].isin(train_ids)]
@@ -1680,8 +1692,8 @@ def main():
     print("Step 4: 训练Informer模型")
     print("="*60)
     
-    # 6个特征: lat, lon, sog, cog, dist_to_dest_km, bearing_diff
-    n_features = 6
+    # 11个特征: lat, lon, sog, cog, dist_to_dest_km, bearing_diff + 5 weather
+    n_features = 11
     model = Informer(
         enc_in=n_features, dec_in=n_features, c_out=1,
         seq_len=args.seq_len, label_len=args.label_len, pred_len=args.pred_len,
