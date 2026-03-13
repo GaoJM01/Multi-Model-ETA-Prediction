@@ -442,6 +442,7 @@ def main():
     parser.add_argument('--workers', type=int, default=4, help='并行工作进程数（默认4，降低内存占用）')
     parser.add_argument('--max_files', type=int, default=None, help='最多处理文件数（用于测试）')
     parser.add_argument('--chunk_size', type=int, default=500000, help='CSV分块读取大小（默认50万行）')
+    parser.add_argument('--file_pattern', type=str, default='*-ais.csv', help='CSV文件匹配模式（默认*-ais.csv）')
     
     args = parser.parse_args()
     
@@ -452,6 +453,7 @@ def main():
     print("并行化AIS数据预处理（内存优化版）")
     print("="*60)
     print(f"数据目录: {args.data_dir}")
+    print(f"文件模式: {args.file_pattern}")
     print(f"输出目录: {args.output_dir}")
     print(f"并行进程数: {n_workers} (建议64GB内存使用4进程)")
     print(f"分块大小: {args.chunk_size:,} 行/块")
@@ -462,7 +464,7 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    csv_files = sorted([f for f in data_dir.glob('*-ais.csv') if not f.name.startswith('._')])
+    csv_files = sorted([f for f in data_dir.glob(args.file_pattern) if not f.name.startswith('._')])
     if args.max_files:
         csv_files = csv_files[:args.max_files]
     
