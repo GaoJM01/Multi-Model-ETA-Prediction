@@ -341,6 +341,126 @@ class MSTGN_MLP2(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
+class MSTGN_MLP3(nn.Module):
+    """Maximum-feature Graph-MLP designed to match XGBoost.
+
+    Extensive feature engineering:
+    - 9 aggregations: last, mean, std, diff, min, max, recent_12_mean, p25, p75
+    - 6 cross-features: sog×dist, dist², sog×bearing, Δsog×dist, wind×sog, dist×bearing
+    - 3 trend features: sog_slope, dist_slope, bearing_slope (linear regression)
+    - 3 ratio features: sog/mean_sog, dist_change_rate, recent_std/global_std
+    - 3 graph contexts: current cell, origin cell, route mean
+    """
+
+    def __init__(self, adj_matrix, init_node_features,
+                 seq_feat_dim=11, seq_len=48,
+                 gcn_hidden=64, cell_emb_dim=32,
+                 dropout=0.1):
+        super().__init__()
+
+        node_feat_dim = init_node_features.shape[1]
+
+        self.register_buffer('adj', torch.from_numpy(adj_matrix).float())
+        self.node_features = nn.Parameter(
+            torch.from_numpy(init_node_features).float()
+        )
+        self.gcn1 = GCNLayer(node_feat_dim, gcn_hidden)
+        self.gcn2 = GCNLayer(gcn_hidden, cell_emb_dim)
+        self.gcn_drop = nn.Dropout(dropout)
+
+        self.seq_len = seq_len
+
+        # 9 agg × 11 + 6 cross + 3 trends + 3 ratios = 111
+        stat_dim = seq_feat_dim * 9 + 6 + 3 + 3
+        total_dim = stat_dim + cell_emb_dim * 3
+
+        self.head = nn.Sequential(
+            nn.Linear(total_dim, 512),
+            nn.ReLU(),
+            nn.BatchNorm1d(512),
+            nn.Dropout(dropout),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.BatchNorm1d(256),
+            nn.Dropout(dropout),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(128, 1)
+        )
+
+        # Pre-compute time indices for slope computation
+        t = torch.arange(seq_len, dtype=torch.float32)
+        t_mean = t.mean()
+        t_var = ((t - t_mean) ** 2).sum()
+        self.register_buffer('t_centered', (t - t_mean))  # (seq_len,)
+        self.register_buffer('t_var', t_var.clone().detach())
+
+    def _compute_slope(self, x_feat):
+        """Compute linear regression slope for a single feature.
+        x_feat: (batch, seq_len) -> slope: (batch, 1)
+        """
+        x_mean = x_feat.mean(dim=1, keepdim=True)
+        x_centered = x_feat - x_mean
+        numerator = (x_centered * self.t_centered.unsqueeze(0)).sum(dim=1, keepdim=True)
+        return numerator / (self.t_var + 1e-8)
+
+    def forward(self, x, cell_ids):
+        h = self.gcn1(self.node_features, self.adj)
+        h = self.gcn_drop(h)
+        cell_emb = self.gcn2(h, self.adj)
+
+        last = x[:, -1, :]
+        first = x[:, 0, :]
+        mean = x.mean(dim=1)
+        std = x.std(dim=1)
+        diff = last - first
+        xmin = x.min(dim=1).values
+        xmax = x.max(dim=1).values
+        recent = x[:, -12:, :]
+        recent_mean = recent.mean(dim=1)
+        p25 = x.quantile(0.25, dim=1)
+        p75 = x.quantile(0.75, dim=1)
+
+        # Cross features: sog=2, dist=4, bearing_diff=5, wind_speed=7
+        sog_x_dist = last[:, 2:3] * last[:, 4:5]
+        dist_sq = last[:, 4:5] ** 2
+        sog_x_bearing = last[:, 2:3] * last[:, 5:6]
+        sog_accel_x_dist = diff[:, 2:3] * last[:, 4:5]
+        wind_x_sog = last[:, 7:8] * last[:, 2:3]
+        dist_x_bearing = last[:, 4:5] * last[:, 5:6]
+
+        # Trend (slope) features for key variables
+        sog_slope = self._compute_slope(x[:, :, 2])   # sog trend
+        dist_slope = self._compute_slope(x[:, :, 4])   # dist trend
+        bearing_slope = self._compute_slope(x[:, :, 5]) # bearing trend
+
+        # Ratio features
+        sog_ratio = last[:, 2:3] / (mean[:, 2:3] + 1e-8)
+        dist_change = diff[:, 4:5] / (first[:, 4:5] + 1e-8)
+        recent_std = recent.std(dim=1)
+        volatility_ratio = recent_std[:, 2:3] / (std[:, 2:3] + 1e-8)
+
+        stats = torch.cat([
+            last, mean, std, diff, xmin, xmax, recent_mean, p25, p75,
+            sog_x_dist, dist_sq, sog_x_bearing, sog_accel_x_dist,
+            wind_x_sog, dist_x_bearing,
+            sog_slope, dist_slope, bearing_slope,
+            sog_ratio, dist_change, volatility_ratio,
+        ], dim=-1)
+
+        current_cell = cell_emb[cell_ids[:, -1]]
+        origin_cell = cell_emb[cell_ids[:, 0]]
+        route_context = cell_emb[cell_ids].mean(dim=1)
+
+        combined = torch.cat([stats, current_cell, origin_cell, route_context],
+                             dim=-1)
+        return self.head(combined).squeeze(-1)
+
+    def count_parameters(self):
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+
 class StatMLP(nn.Module):
     """Statistical feature MLP without graph — ablation baseline.
 
