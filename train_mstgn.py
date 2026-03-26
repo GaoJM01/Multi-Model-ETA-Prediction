@@ -442,7 +442,7 @@ def main():
         # Average the state dicts
         avg_state = {}
         for key in top_ckpts[0][2]:
-            stacked = torch.stack([ckpt[2][key].float() for _, _, ckpt in top_ckpts])
+            stacked = torch.stack([ckpt[key].float() for _, _, ckpt in top_ckpts])
             avg_state[key] = stacked.mean(dim=0)
         model.load_state_dict(avg_state)
         model.to(device)
