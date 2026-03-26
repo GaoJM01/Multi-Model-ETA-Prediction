@@ -347,8 +347,8 @@ class MSTGN_MLP3(nn.Module):
     Extensive feature engineering:
     - 9 aggregations: last, mean, std, diff, min, max, recent_12_mean, p25, p75
     - 6 cross-features: sog×dist, dist², sog×bearing, Δsog×dist, wind×sog, dist×bearing
-    - 3 trend features: sog_slope, dist_slope, bearing_slope (linear regression)
-    - 3 ratio features: sog/mean_sog, dist_change_rate, recent_std/global_std
+    - 3 trend features: sog_slope, dist_slope, bearing_slope (linear regression, clamped)
+    - 2 deviation features: sog_dev (current vs mean), volatility_diff (recent vs global)
     - 3 graph contexts: current cell, origin cell, route mean
     """
 
@@ -370,8 +370,8 @@ class MSTGN_MLP3(nn.Module):
 
         self.seq_len = seq_len
 
-        # 9 agg × 11 + 6 cross + 3 trends + 3 ratios = 111
-        stat_dim = seq_feat_dim * 9 + 6 + 3 + 3
+        # 9 agg × 11 + 6 cross + 3 trends + 2 devs = 110
+        stat_dim = seq_feat_dim * 9 + 6 + 3 + 2
         total_dim = stat_dim + cell_emb_dim * 3
 
         self.head = nn.Sequential(
@@ -430,23 +430,22 @@ class MSTGN_MLP3(nn.Module):
         wind_x_sog = last[:, 7:8] * last[:, 2:3]
         dist_x_bearing = last[:, 4:5] * last[:, 5:6]
 
-        # Trend (slope) features for key variables
-        sog_slope = self._compute_slope(x[:, :, 2])   # sog trend
-        dist_slope = self._compute_slope(x[:, :, 4])   # dist trend
-        bearing_slope = self._compute_slope(x[:, :, 5]) # bearing trend
+        # Trend (slope) features for key variables — clamped for stability
+        sog_slope = self._compute_slope(x[:, :, 2]).clamp(-1, 1)
+        dist_slope = self._compute_slope(x[:, :, 4]).clamp(-1, 1)
+        bearing_slope = self._compute_slope(x[:, :, 5]).clamp(-1, 1)
 
-        # Ratio features
-        sog_ratio = last[:, 2:3] / (mean[:, 2:3] + 1e-8)
-        dist_change = diff[:, 4:5] / (first[:, 4:5] + 1e-8)
+        # Difference features (safe alternative to ratios for normalized data)
+        sog_dev = last[:, 2:3] - mean[:, 2:3]          # SOG deviation from mean
         recent_std = recent.std(dim=1)
-        volatility_ratio = recent_std[:, 2:3] / (std[:, 2:3] + 1e-8)
+        volatility_diff = recent_std[:, 2:3] - std[:, 2:3]  # recent vs global volatility
 
         stats = torch.cat([
             last, mean, std, diff, xmin, xmax, recent_mean, p25, p75,
             sog_x_dist, dist_sq, sog_x_bearing, sog_accel_x_dist,
             wind_x_sog, dist_x_bearing,
             sog_slope, dist_slope, bearing_slope,
-            sog_ratio, dist_change, volatility_ratio,
+            sog_dev, volatility_diff,
         ], dim=-1)
 
         current_cell = cell_emb[cell_ids[:, -1]]
