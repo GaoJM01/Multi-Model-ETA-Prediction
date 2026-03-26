@@ -261,6 +261,86 @@ class MSTGN_MLP(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
 
+class MSTGN_MLP2(nn.Module):
+    """Enhanced Graph-MLP: richer statistical features + same compact architecture.
+
+    Same MLP capacity as MSTGN_MLP but with enriched input:
+    - 7 aggregations: last, mean, std, diff, min, max, recent_12_mean (77 features)
+    - 4 cross-features: sog×dist, dist², sog×bearing, Δsog×dist
+    - 3 graph contexts: current cell, origin cell, route mean
+    """
+
+    def __init__(self, adj_matrix, init_node_features,
+                 seq_feat_dim=11, seq_len=48,
+                 gcn_hidden=64, cell_emb_dim=32,
+                 dropout=0.1):
+        super().__init__()
+
+        node_feat_dim = init_node_features.shape[1]
+
+        self.register_buffer('adj', torch.from_numpy(adj_matrix).float())
+        self.node_features = nn.Parameter(
+            torch.from_numpy(init_node_features).float()
+        )
+        self.gcn1 = GCNLayer(node_feat_dim, gcn_hidden)
+        self.gcn2 = GCNLayer(gcn_hidden, cell_emb_dim)
+        self.gcn_drop = nn.Dropout(dropout)
+
+        # 7 agg × 11 + 4 cross + 3 × cell_emb
+        stat_dim = seq_feat_dim * 7 + 4
+        total_dim = stat_dim + cell_emb_dim * 3
+
+        self.head = nn.Sequential(
+            nn.Linear(total_dim, 512),
+            nn.ReLU(),
+            nn.BatchNorm1d(512),
+            nn.Dropout(dropout),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.BatchNorm1d(256),
+            nn.Dropout(dropout),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(128, 1)
+        )
+
+    def forward(self, x, cell_ids):
+        h = self.gcn1(self.node_features, self.adj)
+        h = self.gcn_drop(h)
+        cell_emb = self.gcn2(h, self.adj)
+
+        last = x[:, -1, :]
+        first = x[:, 0, :]
+        mean = x.mean(dim=1)
+        std = x.std(dim=1)
+        diff = last - first
+        xmin = x.min(dim=1).values
+        xmax = x.max(dim=1).values
+
+        # Cross features (sog=2, dist=4, bearing_diff=5)
+        sog_x_dist = last[:, 2:3] * last[:, 4:5]
+        dist_sq = last[:, 4:5] * last[:, 4:5]
+        sog_x_bearing = last[:, 2:3] * last[:, 5:6]
+        sog_accel_x_dist = diff[:, 2:3] * last[:, 4:5]
+
+        stats = torch.cat([last, mean, std, diff, xmin, xmax,
+                           x[:, -12:, :].mean(dim=1),
+                           sog_x_dist, dist_sq, sog_x_bearing,
+                           sog_accel_x_dist], dim=-1)
+
+        current_cell = cell_emb[cell_ids[:, -1]]
+        origin_cell = cell_emb[cell_ids[:, 0]]
+        route_context = cell_emb[cell_ids].mean(dim=1)
+
+        combined = torch.cat([stats, current_cell, origin_cell, route_context],
+                             dim=-1)
+        return self.head(combined).squeeze(-1)
+
+    def count_parameters(self):
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+
 class StatMLP(nn.Module):
     """Statistical feature MLP without graph — ablation baseline.
 
