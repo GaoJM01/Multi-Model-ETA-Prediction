@@ -259,3 +259,39 @@ class MSTGN_MLP(nn.Module):
 
     def count_parameters(self):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+
+class StatMLP(nn.Module):
+    """Statistical feature MLP without graph — ablation baseline.
+
+    Same features as MSTGN_MLP (last, mean, std, diff) but no graph.
+    """
+
+    def __init__(self, seq_feat_dim=11, dropout=0.1, **kwargs):
+        super().__init__()
+        stat_dim = seq_feat_dim * 4
+        self.head = nn.Sequential(
+            nn.Linear(stat_dim, 512),
+            nn.ReLU(),
+            nn.BatchNorm1d(512),
+            nn.Dropout(dropout),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.BatchNorm1d(256),
+            nn.Dropout(dropout),
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(128, 1)
+        )
+
+    def forward(self, x, cell_ids):
+        last = x[:, -1, :]
+        mean = x.mean(dim=1)
+        std = x.std(dim=1)
+        diff = last - x[:, 0, :]
+        stats = torch.cat([last, mean, std, diff], dim=-1)
+        return self.head(stats).squeeze(-1)
+
+    def count_parameters(self):
+        return sum(p.numel() for p in self.parameters() if p.requires_grad)

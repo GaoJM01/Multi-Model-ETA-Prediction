@@ -31,7 +31,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, Dataset
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
-from src.mstgn.model import MSTGN, MSTGN_LateFusion, MSTGN_MLP
+from src.mstgn.model import MSTGN, MSTGN_LateFusion, MSTGN_MLP, StatMLP
 
 
 # ============================================================
@@ -141,8 +141,8 @@ def main():
     parser.add_argument('--gru_layers', type=int, default=2)
     parser.add_argument('--dropout', type=float, default=0.1)
     parser.add_argument('--variant', type=str, default='gru',
-                        choices=['gru', 'late_fusion', 'mlp'],
-                        help='Model variant: gru (concat), late_fusion, mlp')
+                        choices=['gru', 'late_fusion', 'mlp', 'stat_mlp'],
+                        help='Model variant: gru (concat), late_fusion, mlp, stat_mlp (no graph)')
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -194,18 +194,28 @@ def main():
     print(f"Sequence features: {train_ds.X.shape[-1]}, sequence length: {train_ds.X.shape[1]}")
 
     # ---- Create model ----
-    model_cls = {'gru': MSTGN, 'late_fusion': MSTGN_LateFusion, 'mlp': MSTGN_MLP}[args.variant]
-    model_kwargs = dict(
-        adj_matrix=adj,
-        init_node_features=node_features,
-        seq_feat_dim=train_ds.X.shape[-1],
-        seq_len=train_ds.X.shape[1],
-        gcn_hidden=args.gcn_hidden,
-        cell_emb_dim=args.cell_emb_dim,
-        dropout=args.dropout,
-    )
-    if args.variant != 'mlp':
-        model_kwargs.update(gru_hidden=args.gru_hidden, gru_layers=args.gru_layers)
+    model_cls = {
+        'gru': MSTGN, 'late_fusion': MSTGN_LateFusion,
+        'mlp': MSTGN_MLP, 'stat_mlp': StatMLP
+    }[args.variant]
+
+    if args.variant == 'stat_mlp':
+        model_kwargs = dict(
+            seq_feat_dim=train_ds.X.shape[-1],
+            dropout=args.dropout,
+        )
+    else:
+        model_kwargs = dict(
+            adj_matrix=adj,
+            init_node_features=node_features,
+            seq_feat_dim=train_ds.X.shape[-1],
+            seq_len=train_ds.X.shape[1],
+            gcn_hidden=args.gcn_hidden,
+            cell_emb_dim=args.cell_emb_dim,
+            dropout=args.dropout,
+        )
+        if args.variant != 'mlp':
+            model_kwargs.update(gru_hidden=args.gru_hidden, gru_layers=args.gru_layers)
     model = model_cls(**model_kwargs).to(device)
 
     variant_name = f"MSTGN-{args.variant}"
