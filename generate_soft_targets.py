@@ -58,7 +58,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--cache_dir', default='output/cache_sequences/seq48_label24_pred1_mv150000_ms50000000')
     parser.add_argument('--graph_dir', default='output/graph')
-    parser.add_argument('--ensemble_dir', default='output/mstgn_ensemble')
+    parser.add_argument('--ensemble_dir', default='output/ensemble')
     parser.add_argument('--top_k', type=int, default=7)
     parser.add_argument('--batch_size', type=int, default=4096)
     parser.add_argument('--num_workers', type=int, default=8)
@@ -74,7 +74,7 @@ def main():
     node_features = np.load(graph_dir / 'node_features.npy')
 
     # Find seed dirs and rank by val loss
-    seed_dirs = sorted(ensemble_dir.glob('seed_*'))
+    seed_dirs = sorted([d for d in ensemble_dir.iterdir() if d.is_dir() and d.name.startswith('seed')])
     seed_results = []
     for sd in seed_dirs:
         rfile = sd / 'results.json'

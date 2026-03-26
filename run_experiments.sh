@@ -10,7 +10,7 @@ echo "=========================================="
 echo "Step 0: Generate soft targets from ensemble"
 echo "=========================================="
 if [ ! -f "output/cache_sequences/seq48_label24_pred1_mv150000_ms50000000/soft_targets/y_soft_train.npy" ]; then
-    $PYTHON generate_soft_targets.py --top_k 7
+    $PYTHON generate_soft_targets.py --top_k 7 --ensemble_dir output/ensemble
 else
     echo "Soft targets already exist, skipping."
 fi
