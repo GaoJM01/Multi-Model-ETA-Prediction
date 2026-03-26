@@ -60,7 +60,7 @@ def build_graph(args):
 
     # Accumulators: {cell_id: [sog_sum, sog_sq_sum, temp_sum, wind_sum, prmsl_sum, vis_sum, count]}
     cell_accum = defaultdict(lambda: np.zeros(7, dtype=np.float64))
-    all_transitions = []
+    trans_counter = defaultdict(int)
     last_vid, last_cell = None, None
     total_rows = 0
     weather_cols = ['temp', 'wind_speed', 'prmsl', 'visibility']
@@ -99,32 +99,31 @@ def build_graph(args):
 
         # Handle cross-chunk boundary
         if last_vid is not None and len(vid) > 0:
-            if vid[0] == last_vid and cells.iloc[0] != last_cell:
-                all_transitions.append((int(last_cell), int(cells.iloc[0])))
+            if vid[0] == last_vid and cells[0] != last_cell:
+                trans_counter[(int(last_cell), int(cells[0]))] += 1
 
         # Intra-chunk transitions (vectorized)
-        vid_arr = vid
-        cell_arr = cells.values if hasattr(cells, 'values') else cells
-        same_voyage = vid_arr[1:] == vid_arr[:-1]
-        diff_cell = cell_arr[1:] != cell_arr[:-1]
+        same_voyage = vid[1:] == vid[:-1]
+        diff_cell = cells[1:] != cells[:-1]
         mask = same_voyage & diff_cell
         if mask.any():
-            src = cell_arr[:-1][mask]
-            dst = cell_arr[1:][mask]
+            src = cells[:-1][mask]
+            dst = cells[1:][mask]
             pairs = np.stack([src, dst], axis=1)
             unique_pairs, counts = np.unique(pairs, axis=0, return_counts=True)
             for (s, d), c in zip(unique_pairs, counts):
-                all_transitions.extend([(int(s), int(d))] * int(c))
+                trans_counter[(int(s), int(d))] += int(c)
 
         if len(vid) > 0:
             last_vid = vid[-1]
-            last_cell = cell_arr[-1]
+            last_cell = cells[-1]
 
         if (i + 1) % 5 == 0:
             print(f"  Chunk {i+1}: {total_rows:,} rows processed")
 
     print(f"Total: {total_rows:,} rows")
     print(f"Unique cells seen: {len(cell_accum)}")
+    print(f"Unique transitions: {len(trans_counter)}")
 
     # ============================================================
     # Phase 2: Build compact cell mapping
@@ -185,11 +184,6 @@ def build_graph(args):
     print("\n=== Phase 4: Building adjacency matrix ===")
 
     adj = np.zeros((N, N), dtype=np.float32)
-
-    # Count transitions
-    trans_counter = defaultdict(int)
-    for s, d in all_transitions:
-        trans_counter[(s, d)] += 1
 
     # Transition-based edges
     trans_edges = 0
