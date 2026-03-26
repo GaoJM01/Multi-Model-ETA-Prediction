@@ -1,0 +1,315 @@
+#!/usr/bin/env python
+"""
+Training script for MSTGN (Maritime Spatio-Temporal Graph Network).
+
+Uses the same preprocessed data as baselines, plus:
+- Maritime route graph (adj_normalized.npy, node_features.npy)
+- Cell ID mappings (cell_ids_{split}.npy)
+
+Usage:
+    python train_mstgn.py
+    python train_mstgn.py --epochs 15 --gru_hidden 256 --cell_emb_dim 32
+"""
+
+import os
+import sys
+import gc
+import json
+import argparse
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from pathlib import Path
+from datetime import datetime
+from tqdm import tqdm
+
+import torch
+import torch.nn as nn
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import DataLoader, Dataset
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+from src.mstgn.model import MSTGN
+
+
+# ============================================================
+# Utilities
+# ============================================================
+
+def inverse_normalize_target(normalized, target_mean, target_std):
+    log_target = normalized * target_std + target_mean
+    return np.expm1(log_target)
+
+
+def calculate_metrics(y_pred, y_true):
+    mse = np.mean((y_pred - y_true) ** 2)
+    mae = np.mean(np.abs(y_pred - y_true))
+    rmse = np.sqrt(mse)
+    mask = y_true > 24
+    mape = np.mean(np.abs((y_pred[mask] - y_true[mask]) / y_true[mask])) * 100 if mask.sum() > 0 else 0
+    return {'MSE': mse, 'MAE_hours': mae, 'MAE_days': mae / 24, 'RMSE': rmse, 'MAPE': mape}
+
+
+def send_discord_notification(message):
+    import urllib.request
+    webhook_url = "https://discord.com/api/webhooks/1477180434474336266/HQSS_BKlo1Ib-rzwItazg8ay0To2l-GR1GprnTvlPVpLxCxD9aBd4iHNgX"
+    data = json.dumps({"content": message}).encode('utf-8')
+    req = urllib.request.Request(webhook_url, data=data,
+                                headers={'Content-Type': 'application/json'})
+    try:
+        urllib.request.urlopen(req)
+    except Exception:
+        pass
+
+
+# ============================================================
+# Dataset
+# ============================================================
+
+class MSTGNDataset(Dataset):
+    """Dataset that provides sequence features, cell IDs, and targets."""
+
+    def __init__(self, X_path, cell_ids_path, y_path, actual_length=None):
+        self.X = np.load(X_path, mmap_mode='r')
+        self.cell_ids = np.load(cell_ids_path, mmap_mode='r')
+        self.y = np.load(y_path, mmap_mode='r')
+        self.length = actual_length if actual_length is not None else len(self.y)
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        return (
+            torch.from_numpy(self.X[idx].copy()).float(),
+            torch.from_numpy(self.cell_ids[idx].copy()).long(),
+            torch.tensor(self.y[idx]).float()
+        )
+
+
+# ============================================================
+# Training
+# ============================================================
+
+def train_one_epoch(model, loader, optimizer, criterion, device, epoch, epochs):
+    model.train()
+    losses = []
+    pbar = tqdm(loader, desc=f"Train {epoch+1}/{epochs}", leave=False)
+    for x, cell_ids, y in pbar:
+        x, cell_ids, y = x.to(device), cell_ids.to(device), y.to(device)
+        optimizer.zero_grad()
+        pred = model(x, cell_ids)
+        loss = criterion(pred, y)
+        loss.backward()
+        nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+        losses.append(loss.item())
+        pbar.set_postfix(loss=f"{loss.item():.4f}")
+    return np.mean(losses)
+
+
+@torch.no_grad()
+def evaluate(model, loader, criterion, device):
+    model.eval()
+    losses = []
+    preds, targets = [], []
+    for x, cell_ids, y in loader:
+        x, cell_ids, y = x.to(device), cell_ids.to(device), y.to(device)
+        pred = model(x, cell_ids)
+        losses.append(criterion(pred, y).item())
+        preds.append(pred.cpu().numpy())
+        targets.append(y.cpu().numpy())
+    return np.mean(losses), np.concatenate(preds), np.concatenate(targets)
+
+
+def main():
+    parser = argparse.ArgumentParser(description='Train MSTGN')
+    parser.add_argument('--cache_dir', default='output/cache_sequences/seq48_label24_pred1_mv150000_ms50000000')
+    parser.add_argument('--norm_path', default='output/norm_params.npz')
+    parser.add_argument('--graph_dir', default='output/graph')
+    parser.add_argument('--output_dir', default='output/mstgn')
+    parser.add_argument('--batch_size', type=int, default=4096)
+    parser.add_argument('--num_workers', type=int, default=8)
+    parser.add_argument('--epochs', type=int, default=15)
+    parser.add_argument('--lr', type=float, default=1e-3)
+    parser.add_argument('--patience', type=int, default=4)
+    # Model hyperparameters
+    parser.add_argument('--gcn_hidden', type=int, default=64)
+    parser.add_argument('--cell_emb_dim', type=int, default=32)
+    parser.add_argument('--gru_hidden', type=int, default=256)
+    parser.add_argument('--gru_layers', type=int, default=2)
+    parser.add_argument('--dropout', type=float, default=0.1)
+    args = parser.parse_args()
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Device: {device}")
+    print(f"Args: {vars(args)}")
+
+    # ---- Load normalization params ----
+    norm = np.load(args.norm_path, allow_pickle=True)
+    target_mean = float(norm['target_mean'])
+    target_std = float(norm['target_std'])
+
+    # ---- Load graph ----
+    graph_dir = Path(args.graph_dir)
+    adj = np.load(graph_dir / 'adj_normalized.npy')
+    node_features = np.load(graph_dir / 'node_features.npy')
+    with open(graph_dir / 'graph_meta.json') as f:
+        graph_meta = json.load(f)
+
+    print(f"Graph: {graph_meta['num_nodes']} nodes, "
+          f"{graph_meta['num_active_cells']} active cells, "
+          f"cell_size={graph_meta['cell_size']}°")
+
+    # ---- Load data ----
+    cache_dir = Path(args.cache_dir)
+    counts = np.load(cache_dir / 'actual_counts.npy', allow_pickle=True).item()
+
+    train_ds = MSTGNDataset(
+        cache_dir / 'X_train.npy', cache_dir / 'cell_ids_train.npy',
+        cache_dir / 'y_train.npy', counts['train']
+    )
+    val_ds = MSTGNDataset(
+        cache_dir / 'X_val.npy', cache_dir / 'cell_ids_val.npy',
+        cache_dir / 'y_val.npy', counts['val']
+    )
+    test_ds = MSTGNDataset(
+        cache_dir / 'X_test.npy', cache_dir / 'cell_ids_test.npy',
+        cache_dir / 'y_test.npy', counts['test']
+    )
+
+    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True,
+                              num_workers=args.num_workers, pin_memory=True)
+    val_loader = DataLoader(val_ds, batch_size=args.batch_size,
+                            num_workers=args.num_workers, pin_memory=True)
+    test_loader = DataLoader(test_ds, batch_size=args.batch_size,
+                             num_workers=args.num_workers, pin_memory=True)
+
+    print(f"Data: train={counts['train']:,}, val={counts['val']:,}, test={counts['test']:,}")
+    print(f"Sequence features: {train_ds.X.shape[-1]}, sequence length: {train_ds.X.shape[1]}")
+
+    # ---- Create model ----
+    model = MSTGN(
+        adj_matrix=adj,
+        init_node_features=node_features,
+        seq_feat_dim=train_ds.X.shape[-1],
+        seq_len=train_ds.X.shape[1],
+        gcn_hidden=args.gcn_hidden,
+        cell_emb_dim=args.cell_emb_dim,
+        gru_hidden=args.gru_hidden,
+        gru_layers=args.gru_layers,
+        dropout=args.dropout,
+    ).to(device)
+
+    print(f"MSTGN parameters: {model.count_parameters():,}")
+
+    # ---- Training ----
+    optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=1)
+    criterion = nn.HuberLoss(delta=1.0)
+
+    best_val = float('inf')
+    best_state = None
+    no_improve = 0
+    train_losses, val_losses = [], []
+
+    print(f"\n{'='*60}")
+    print(f"Training MSTGN for {args.epochs} epochs")
+    print(f"{'='*60}")
+
+    for epoch in range(args.epochs):
+        train_loss = train_one_epoch(model, train_loader, optimizer, criterion,
+                                     device, epoch, args.epochs)
+        val_loss, _, _ = evaluate(model, val_loader, criterion, device)
+
+        scheduler.step(val_loss)
+        lr_now = optimizer.param_groups[0]['lr']
+        train_losses.append(train_loss)
+        val_losses.append(val_loss)
+
+        improved = ""
+        if val_loss < best_val:
+            best_val = val_loss
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            no_improve = 0
+            improved = " ★"
+            torch.save(best_state, Path(args.output_dir) / 'best_mstgn.pth')
+        else:
+            no_improve += 1
+
+        print(f"  Epoch {epoch+1}/{args.epochs}: "
+              f"Train={train_loss:.4f}, Val={val_loss:.4f}, "
+              f"LR={lr_now:.2e}{improved}")
+
+        if no_improve >= args.patience:
+            print(f"  Early stopping at epoch {epoch+1}")
+            break
+
+    # ---- Evaluate best model ----
+    print(f"\n{'='*60}")
+    print("Evaluating best model on test set")
+    print(f"{'='*60}")
+
+    model.load_state_dict(best_state)
+    model.to(device)
+    _, y_pred_norm, y_true_norm = evaluate(model, test_loader, criterion, device)
+
+    y_pred = inverse_normalize_target(y_pred_norm, target_mean, target_std)
+    y_true = inverse_normalize_target(y_true_norm, target_mean, target_std)
+    y_pred = np.maximum(y_pred, 0)
+
+    metrics = calculate_metrics(y_pred, y_true)
+    print(f"\nMSTGN Test Results:")
+    print(f"  MAE:  {metrics['MAE_hours']:.2f} hours ({metrics['MAE_days']:.2f} days)")
+    print(f"  RMSE: {metrics['RMSE']:.2f} hours")
+    print(f"  MAPE: {metrics['MAPE']:.2f}%")
+
+    # Save results
+    results = {
+        'model': 'MSTGN',
+        'metrics': {k: float(v) for k, v in metrics.items()},
+        'args': vars(args),
+        'graph_meta': graph_meta,
+        'num_parameters': model.count_parameters(),
+        'best_val_loss': float(best_val),
+        'epochs_trained': len(train_losses),
+        'timestamp': datetime.now().isoformat(),
+    }
+    with open(Path(args.output_dir) / 'results.json', 'w') as f:
+        json.dump(results, f, indent=2)
+
+    # Save training curve
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(range(1, len(train_losses)+1), train_losses, label='Train', marker='o')
+    ax.plot(range(1, len(val_losses)+1), val_losses, label='Val', marker='s')
+    ax.set_xlabel('Epoch')
+    ax.set_ylabel('Huber Loss')
+    ax.set_title('MSTGN Training Curve')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    fig.savefig(Path(args.output_dir) / 'training_curve.png', dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
+    # Save predictions for analysis
+    np.savez(Path(args.output_dir) / 'predictions.npz',
+             y_pred=y_pred, y_true=y_true,
+             y_pred_norm=y_pred_norm, y_true_norm=y_true_norm)
+
+    # Discord notification
+    msg = (f"🚢 MSTGN Training Complete!\n"
+           f"MAE: {metrics['MAE_hours']:.2f}h | "
+           f"RMSE: {metrics['RMSE']:.2f}h | "
+           f"MAPE: {metrics['MAPE']:.2f}%\n"
+           f"Graph: {graph_meta['num_nodes']} nodes, "
+           f"{graph_meta['cell_size']}° cells\n"
+           f"Params: {model.count_parameters():,}")
+    send_discord_notification(msg)
+
+    print(f"\nResults saved to {args.output_dir}")
+    print("Done!")
+
+
+if __name__ == '__main__':
+    main()
