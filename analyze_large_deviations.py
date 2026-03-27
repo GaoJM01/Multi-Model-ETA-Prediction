@@ -21,7 +21,7 @@ def load_predictions(pred_dir, norm_path='output/norm_params.npz'):
 
 def load_test_features(cache_dir):
     """Load test set raw features for analysis."""
-    x_test = np.load(Path(cache_dir) / 'x_test.npy', mmap_mode='r')
+    x_test = np.load(Path(cache_dir) / 'X_test.npy', mmap_mode='r')
     cell_test = np.load(Path(cache_dir) / 'cell_ids_test.npy', mmap_mode='r')
     return x_test, cell_test
 
