@@ -72,11 +72,12 @@ class MSTGNDataset(Dataset):
     """Dataset that provides sequence features, cell IDs, and targets."""
 
     def __init__(self, X_path, cell_ids_path, y_path, actual_length=None,
-                 soft_targets_path=None):
+                 soft_targets_path=None, sample_weights_path=None):
         self.X = np.load(X_path, mmap_mode='r')
         self.cell_ids = np.load(cell_ids_path, mmap_mode='r')
         self.y = np.load(y_path, mmap_mode='r')
         self.soft = np.load(soft_targets_path, mmap_mode='r') if soft_targets_path else None
+        self.weights = np.load(sample_weights_path, mmap_mode='r') if sample_weights_path else None
         self.length = actual_length if actual_length is not None else len(self.y)
 
     def __len__(self):
@@ -89,7 +90,9 @@ class MSTGNDataset(Dataset):
             torch.tensor(self.y[idx]).float()
         )
         if self.soft is not None:
-            return items + (torch.tensor(self.soft[idx]).float(),)
+            items = items + (torch.tensor(self.soft[idx]).float(),)
+        if self.weights is not None:
+            items = items + (torch.tensor(self.weights[idx]).float(),)
         return items
 
 
@@ -98,18 +101,40 @@ class MSTGNDataset(Dataset):
 # ============================================================
 
 def train_one_epoch(model, loader, optimizer, criterion, device, epoch, epochs,
-                    distill_alpha=0.0):
+                    distill_alpha=0.0, has_weights=False, dual_loss_fn=None):
     model.train()
     losses = []
     pbar = tqdm(loader, desc=f"Train {epoch+1}/{epochs}", leave=False)
     for batch in pbar:
         x, cell_ids, y = batch[0].to(device), batch[1].to(device), batch[2].to(device)
+        # Determine which batch elements are soft targets vs weights
+        batch_idx = 3
+        y_soft = None
+        w = None
+        if distill_alpha > 0 and batch_idx < len(batch):
+            y_soft = batch[batch_idx].to(device)
+            batch_idx += 1
+        if has_weights and batch_idx < len(batch):
+            w = batch[batch_idx].to(device)
+
         optimizer.zero_grad()
         pred = model(x, cell_ids)
-        loss_hard = criterion(pred, y)
-        if distill_alpha > 0 and len(batch) > 3:
-            y_soft = batch[3].to(device)
-            loss_soft = nn.functional.mse_loss(pred, y_soft)
+
+        # Compute loss
+        if dual_loss_fn is not None:
+            loss_hard = dual_loss_fn(pred, y)
+        elif w is not None:
+            # Weighted MSE: per-sample loss weighted by sample importance
+            per_sample = (pred - y) ** 2
+            loss_hard = (per_sample * w).mean()
+        else:
+            loss_hard = criterion(pred, y)
+
+        if distill_alpha > 0 and y_soft is not None:
+            if w is not None:
+                loss_soft = ((pred - y_soft) ** 2 * w).mean()
+            else:
+                loss_soft = nn.functional.mse_loss(pred, y_soft)
             loss = (1 - distill_alpha) * loss_hard + distill_alpha * loss_soft
         else:
             loss = loss_hard
@@ -188,6 +213,11 @@ def main():
     # Checkpoint averaging
     parser.add_argument('--ckpt_avg', type=int, default=0,
                         help='Number of top checkpoints to average (0=disabled)')
+    # Large deviation reduction
+    parser.add_argument('--sample_weights', type=str, default=None,
+                        help='Path to .npy sample weight file for weighted training')
+    parser.add_argument('--dual_loss_beta', type=float, default=0.0,
+                        help='Weight for hours-space loss in dual-space loss (0=disabled)')
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -234,7 +264,8 @@ def main():
     train_ds = MSTGNDataset(
         cache_dir / 'X_train.npy', cache_dir / 'cell_ids_train.npy',
         cache_dir / 'y_train.npy', counts['train'],
-        soft_targets_path=soft_dir / 'y_soft_train.npy' if soft_dir else None
+        soft_targets_path=soft_dir / 'y_soft_train.npy' if soft_dir else None,
+        sample_weights_path=args.sample_weights if args.sample_weights else None
     )
     val_ds = MSTGNDataset(
         cache_dir / 'X_val.npy', cache_dir / 'cell_ids_val.npy',
@@ -328,6 +359,18 @@ def main():
         use_cosine = False
     criterion = nn.HuberLoss(delta=1.0) if args.loss == 'huber' else nn.MSELoss()
 
+    # Dual-space loss
+    dual_loss_fn = None
+    if args.dual_loss_beta > 0:
+        from reduce_large_deviations import DualSpaceLoss
+        dual_loss_fn = DualSpaceLoss(target_mean, target_std, beta=args.dual_loss_beta)
+        print(f"Dual-space loss enabled: beta={args.dual_loss_beta}")
+
+    # Sample weighting
+    has_weights = args.sample_weights is not None
+    if has_weights:
+        print(f"Sample weighting enabled: {args.sample_weights}")
+
     # SWA setup
     swa_model = None
     if args.swa:
@@ -351,7 +394,9 @@ def main():
     for epoch in range(args.epochs):
         train_loss = train_one_epoch(model, train_loader, optimizer, criterion,
                                      device, epoch, args.epochs,
-                                     distill_alpha=args.distill_alpha if args.distill else 0.0)
+                                     distill_alpha=args.distill_alpha if args.distill else 0.0,
+                                     has_weights=has_weights,
+                                     dual_loss_fn=dual_loss_fn)
         val_loss, _, _ = evaluate(model, val_loader, criterion, device)
 
         if args.swa and epoch >= args.swa_start:
@@ -429,10 +474,13 @@ def main():
     y_pred = np.maximum(y_pred, 0)
 
     metrics = calculate_metrics(y_pred, y_true)
+    large_100 = int((np.abs(y_pred - y_true) > 100).sum())
+    large_100_rate = large_100 / len(y_true) * 100
     print(f"\n{variant_name} Test Results:")
     print(f"  MAE:  {metrics['MAE_hours']:.2f} hours ({metrics['MAE_days']:.2f} days)")
     print(f"  RMSE: {metrics['RMSE']:.2f} hours")
     print(f"  MAPE: {metrics['MAPE']:.2f}%")
+    print(f"  |err|>100h: {large_100:,} ({large_100_rate:.3f}%)")
 
     # Checkpoint averaging evaluation
     if args.ckpt_avg > 0 and len(top_ckpts) > 1:
