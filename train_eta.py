@@ -943,71 +943,119 @@ def analyze_bad_cases(y_pred, y_true, X_input, test_meta, dataset, save_dir, thr
 
 
 def plot_results(y_pred, y_true, sailing_days, save_dir, suffix="", title_prefix=""):
-    """绘制评估结果
-    
-    Args:
-        suffix: 文件名后缀，如 '_sailing' 或 '_total'
-        title_prefix: 图标题前缀，如 '单模型' 或 '双模型'
+    """Generate four complementary analysis panels for model evaluation.
+
+    Panels:
+      (a) Predicted vs Actual  – hexbin density scatter
+      (b) MAE by Voyage Progress – binned by % of voyage elapsed
+      (c) Error Distribution   – histogram with mean/median lines
+      (d) Cumulative Accuracy  – % of predictions within X hours
     """
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    
-    # 1. 误差vs航行天数
+    import matplotlib.ticker as mticker
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+
+    errors = y_pred - y_true
+    abs_errors = np.abs(errors)
+    mae = np.mean(abs_errors)
+
+    # ── (a) Predicted vs Actual (density) ──
     ax = axes[0, 0]
-    scatter = ax.scatter(sailing_days, np.abs(y_pred - y_true), c=y_true, cmap='viridis', alpha=0.5, s=10)
-    ax.set_xlabel('Sailing Days')
-    ax.set_ylabel('Absolute Error (hours)')
-    ax.set_title('Prediction Error vs Sailing Days')
-    plt.colorbar(scatter, ax=ax, label='True Remaining Hours')
-    
-    # 2. 分箱MAE
-    ax = axes[0, 1]
-    bins = np.arange(0, sailing_days.max() + 1, 1)
-    bin_indices = np.digitize(sailing_days, bins)
-    bin_maes, bin_centers = [], []
-    for i in range(1, len(bins)):
-        mask = bin_indices == i
-        if mask.sum() > 10:
-            bin_maes.append(np.mean(np.abs(y_pred[mask] - y_true[mask])))
-            bin_centers.append((bins[i-1] + bins[i]) / 2)
-    ax.bar(bin_centers, bin_maes, width=0.8, alpha=0.7, color='steelblue')
-    ax.set_xlabel('Sailing Days')
-    ax.set_ylabel('MAE (hours)')
-    ax.set_title('MAE by Sailing Days')
-    ax.grid(True, alpha=0.3)
-    
-    # 3. 预测vs实际 - 使用2D直方图展示密度
-    ax = axes[1, 0]
-    max_val = max(y_true.max(), y_pred.max())
-    
-    # 使用hexbin展示点密度
-    hb = ax.hexbin(y_true, y_pred, gridsize=50, cmap='Blues', mincnt=1, 
+    max_val = max(y_true.max(), y_pred.max()) * 1.02
+    hb = ax.hexbin(y_true, y_pred, gridsize=60, cmap='Blues', mincnt=1,
                    extent=[0, max_val, 0, max_val])
-    ax.plot([0, max_val], [0, max_val], 'r--', linewidth=2, label='Perfect')
-    ax.set_xlabel('Actual Hours')
-    ax.set_ylabel('Predicted Hours')
-    ax.set_title('Predicted vs Actual (density)')
-    ax.legend()
+    ax.plot([0, max_val], [0, max_val], 'r--', linewidth=1.5, label='Perfect', zorder=5)
+    ax.set_xlabel('Actual Remaining (hours)')
+    ax.set_ylabel('Predicted Remaining (hours)')
+    ax.set_title('(a) Predicted vs Actual')
+    ax.legend(loc='upper left', fontsize=9)
     ax.set_xlim(0, max_val)
     ax.set_ylim(0, max_val)
-    plt.colorbar(hb, ax=ax, label='Count')
-    
-    # 4. 误差分布
-    ax = axes[1, 1]
-    errors = y_pred - y_true
-    ax.hist(errors, bins=50, alpha=0.7, color='steelblue', edgecolor='black')
-    ax.axvline(x=0, color='red', linestyle='--')
-    ax.axvline(x=np.mean(errors), color='orange', linestyle='-', label=f'Mean: {np.mean(errors):.1f}h')
+    ax.set_aspect('equal', adjustable='box')
+    fig.colorbar(hb, ax=ax, label='Count', shrink=0.8)
+
+    # ── (b) MAE by Voyage Progress ──
+    ax = axes[0, 1]
+    # Compute voyage progress as percentage (sailing_days / max sailing_days per voyage)
+    # Since we only have sailing_days and true remaining, progress ≈ elapsed / total
+    total_hours_est = sailing_days * 24 + y_true  # elapsed + remaining ≈ total
+    progress_pct = np.where(total_hours_est > 0,
+                            sailing_days * 24 / total_hours_est * 100, 0)
+    progress_pct = np.clip(progress_pct, 0, 100)
+
+    n_bins = 10
+    bin_edges = np.linspace(0, 100, n_bins + 1)
+    bin_maes, bin_counts, bin_centers = [], [], []
+    for i in range(n_bins):
+        mask = (progress_pct >= bin_edges[i]) & (progress_pct < bin_edges[i + 1])
+        if i == n_bins - 1:  # include right edge for last bin
+            mask |= (progress_pct == bin_edges[i + 1])
+        if mask.sum() > 0:
+            bin_maes.append(np.mean(abs_errors[mask]))
+            bin_counts.append(mask.sum())
+            bin_centers.append((bin_edges[i] + bin_edges[i + 1]) / 2)
+
+    bars = ax.bar(bin_centers, bin_maes, width=8, color='#4C72B0', edgecolor='white',
+                  linewidth=0.8, alpha=0.85)
+    # Annotate sample counts above bars
+    for bar, cnt in zip(bars, bin_counts):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.3,
+                f'n={cnt:,}', ha='center', va='bottom', fontsize=6.5, color='#555555')
+    ax.set_xlabel('Voyage Progress (%)')
+    ax.set_ylabel('MAE (hours)')
+    ax.set_title('(b) MAE by Voyage Progress')
+    ax.set_xlim(-2, 102)
+    ax.grid(axis='y', alpha=0.3)
+
+    # ── (c) Error Distribution ──
+    ax = axes[1, 0]
+    # Clip for display but compute stats on full data
+    clip_val = np.percentile(np.abs(errors), 99.5)
+    display_errors = np.clip(errors, -clip_val, clip_val)
+    ax.hist(display_errors, bins=80, color='#4C72B0', edgecolor='white',
+            linewidth=0.3, alpha=0.85)
+    ax.axvline(x=0, color='#C44E52', linestyle='--', linewidth=1.2, label='Zero')
+    ax.axvline(x=np.mean(errors), color='#DD8452', linestyle='-', linewidth=1.5,
+               label=f'Mean: {np.mean(errors):+.1f}h')
+    ax.axvline(x=np.median(errors), color='#55A868', linestyle='-', linewidth=1.5,
+               label=f'Median: {np.median(errors):+.1f}h')
     ax.set_xlabel('Prediction Error (hours)')
     ax.set_ylabel('Count')
-    ax.set_title(f'{title_prefix}Error Distribution' if title_prefix else 'Error Distribution')
-    ax.legend()
+    ax.set_title('(c) Error Distribution')
+    ax.legend(fontsize=8)
+    ax.grid(axis='y', alpha=0.3)
+
+    # ── (d) Cumulative Accuracy ──
+    ax = axes[1, 1]
+    thresholds = np.arange(0, 101, 1)
+    cum_pct = np.array([np.mean(abs_errors <= t) * 100 for t in thresholds])
+    ax.plot(thresholds, cum_pct, color='#4C72B0', linewidth=2)
+    ax.fill_between(thresholds, cum_pct, alpha=0.15, color='#4C72B0')
+    # Mark key percentages
+    for target_pct in [50, 80, 90, 95]:
+        idx = np.searchsorted(cum_pct, target_pct)
+        if idx < len(thresholds):
+            ax.plot(thresholds[idx], target_pct, 'o', color='#C44E52', markersize=5, zorder=5)
+            ax.annotate(f'{target_pct}% within {thresholds[idx]}h',
+                        xy=(thresholds[idx], target_pct),
+                        xytext=(thresholds[idx] + 4, target_pct - 4),
+                        fontsize=7.5, color='#333333',
+                        arrowprops=dict(arrowstyle='->', color='#999999', lw=0.8))
+    ax.set_xlabel('Absolute Error Threshold (hours)')
+    ax.set_ylabel('Percentage of Predictions (%)')
+    ax.set_title(f'(d) Cumulative Accuracy (MAE = {mae:.2f}h)')
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 102)
     ax.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
+
+    plt.tight_layout(pad=1.5)
     filename = f'analysis_plots{suffix}.png' if suffix else 'analysis_plots.png'
-    plt.savefig(os.path.join(save_dir, filename), dpi=150)
+    plt.savefig(os.path.join(save_dir, filename), dpi=200, bbox_inches='tight')
+    # Also save PDF for paper
+    pdf_name = f'analysis_plots{suffix}.pdf' if suffix else 'analysis_plots.pdf'
+    plt.savefig(os.path.join(save_dir, pdf_name), bbox_inches='tight')
     plt.close()
-    print(f"Plots saved to {save_dir}/{filename}")
+    print(f"Plots saved to {save_dir}/{filename} and {pdf_name}")
 
 
 # ============================================================
