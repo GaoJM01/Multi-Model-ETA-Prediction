@@ -66,11 +66,10 @@ Our main contributions are:
     \item An ensemble knowledge distillation framework that trains a multi-seed teacher ensemble (15 models, top-7 achieving MAE = 14.95\,h) and distills its knowledge into a single student model that retains virtually all of the ensemble's advantage.
     \item Ablation studies demonstrating that (a) statistical feature engineering is the dominant factor, (b) temporal sequence modeling adds limited value, and (c) incorporating meteorological features yields a 7.1\% MAE improvement.
     \item A large-deviation analysis identifying that 96\% of extreme prediction errors ($>$100\,h) are systematic underestimates concentrated in ultra-long voyages, with evaluation of remediation strategies achieving up to 5\% relative tail error reduction.
-    \item A decoupled prediction architecture that separately models sailing time and port-dwell time, reflecting their distinct underlying dynamics.
 \end{enumerate}
 
-\section{Related Works}
-Numerous studies have addressed the issue of vessel arrival uncertainty during voyages by predicting vessel ETA to assist operators in making informed decisions ~\citep{yuShipArrivalPrediction2018,chuVesselArrivalTime2025,duSegmentedETAPrediction2025,nomanReviewVesselTime2025}. AIS data provides diverse information on vessel voyages, encompassing static details (e.g., size, name and IMO number), dynamic attributes (e.g., location and heading), and voyage-specific information (e.g., destination and draft). These AIS data can be generated and transmitted at intervals that range from a few seconds to several minutes, providing an extensive and dynamic dataset of vessel movements \citep{yangHarnessingPowerMachine2024, chuEvaluationPredictionPunctuality2023}. These studies can be broadly categorized into two methodological branches: path/trajectory-based methods, machine learning and feature-engineering-based methods\citep{leiPredictingVesselArrival2024}. Each branch offers distinct perspectives on how to model ETA prediction, with varying assumptions about the importance of route structure, feature interactions, and temporal dynamics. In Table 1, we summarize recent studies on VAT prediction, and in the following subsections, we review representative studies from each category to highlight their approaches and findings.
+\section{Related Work}
+Numerous studies have addressed the issue of vessel arrival uncertainty during voyages by predicting vessel ETA to assist operators in making informed decisions~\cite{yuShipArrivalPrediction2018,chuVesselArrivalTime2025,duSegmentedETAPrediction2025,nomanReviewVesselTime2025}. AIS data provides diverse information on vessel voyages, encompassing static details (e.g., size, name and IMO number), dynamic attributes (e.g., location and heading), and voyage-specific information (e.g., destination and draft). These AIS data can be generated and transmitted at intervals that range from a few seconds to several minutes, providing an extensive and dynamic dataset of vessel movements~\cite{yangHarnessingPowerMachine2024, chuEvaluationPredictionPunctuality2023}. These studies can be broadly categorized into two methodological branches: path/trajectory-based methods, and machine learning and feature-engineering-based methods~\cite{leiPredictingVesselArrival2024}. Each branch offers distinct perspectives on how to model ETA prediction, with varying assumptions about the importance of route structure, feature interactions, and temporal dynamics. In Table~\ref{tab:related_literature}, we summarize recent studies on vessel arrival time prediction, and in the following subsections, we review representative studies from each category to highlight their approaches and findings.
 \begin{table*}[htbp]
 \centering
 \caption{Summary of related literature.}
@@ -95,7 +94,7 @@ Wenzel et al. (2023)\cite{wenzelNeuralNetworkApproach2023} & Vessel trajectory &
 
 Yoon et al. (2023)\cite{yoonEnhancingContainerVessel2023} & Vessel trajectory & Interpolation method & AIS data & Interpolation & ETA prediction using voyage route patterns \\
 
-El Mekkaoui et al. (2023)\cite{elmekkaouiDeepLearningModels2022} & Vessel trajectory & CNN, LSTM, ANN, RNN & AIS data & LSTM & First bulk vessel VAT prediction study \\
+El Mekkaoui et al. (2023)\cite{elmekkaouiDeepLearningModels2022} & Vessel trajectory & CNN, LSTM, ANN, RNN & AIS data & LSTM & First bulk vessel ETA prediction study \\
 
 Kolley et al. (2023)\cite{kolleyRobustBerthScheduling2022} & Vessel trajectory & LR, DT, ANN, KNN & AIS data & KNN & Berth scheduling integration evaluation \\
 
@@ -104,43 +103,35 @@ Du et al. (2025)\cite{duSegmentedETAPrediction2025} & Vessel trajectory & CNN, L
 \end{tabular}
 \end{table*}
 
-\subsection{ETA prediction based on path finding}
-Path- and trajectory-based methods form one of the most distinctive branches of maritime ETA research because they preserve explicit spatial structure rather than treating ETA purely as a tabular regression target. \cite{parkVesselEstimatedTime2021} proposed a path-finding-based ETA prediction system that combined AIS-derived route grids, Q-learning-based path search, and MCMC-based speed sampling, showing more stable ETA behavior than a Dijkstra-based baseline, especially over longer sailing distances. \cite{yoonEnhancingContainerVessel2023} developed a past-voyage route modeling approach in which representative historical routes were first constructed from prior port calls and then used to map real-time AIS positions and speeds for ETA prediction at Busan New Port. In methodological terms, these studies share the view that ETA accuracy can be improved by explicitly modeling the vessel’s remaining path, route regularity, and progress along historically meaningful trajectories. As summarized by \cite{jiangPredictionVesselArrival2025}, such trajectory-oriented approaches are especially valuable when route structure is informative and relatively repeatable, although their robustness may decline when vessels deviate from typical routes or when disruptions weaken the predictive value of historical path patterns.
+\subsection{ETA Prediction Based on Path Finding}
+Path- and trajectory-based methods form one of the most distinctive branches of maritime ETA research because they preserve explicit spatial structure rather than treating ETA purely as a tabular regression target. K.~Park et al.~\cite{parkVesselEstimatedTime2021} proposed a path-finding-based ETA prediction system that combined AIS-derived route grids, Q-learning-based path search, and MCMC-based speed sampling, showing more stable ETA behavior than a Dijkstra-based baseline, especially over longer sailing distances. J.~H.~Yoon et al.~\cite{yoonEnhancingContainerVessel2023} developed a past-voyage route modeling approach in which representative historical routes were first constructed from prior port calls and then used to map real-time AIS positions and speeds for ETA prediction at Busan New Port. In methodological terms, these studies share the view that ETA accuracy can be improved by explicitly modeling the vessel’s remaining path, route regularity, and progress along historically meaningful trajectories. As summarized by S.~Jiang et al.~\cite{jiangPredictionVesselArrival2025}, such trajectory-oriented approaches are especially valuable when route structure is informative and relatively repeatable, although their robustness may decline when vessels deviate from typical routes or when disruptions weaken the predictive value of historical path patterns.
 
-\subsection{ETA prediction based on feature engineering}
-A second and now highly influential branch treats ETA prediction as a supervised learning problem over AIS variables, vessel characteristics, and operational features. \cite{yuShipArrivalPrediction2018} provided an early example by comparing BP, CART, and Random Forest models for ship arrival prediction and then linking the resulting forecasts to berth allocation and quay crane scheduling, thereby showing that ETA prediction has operational value beyond statistical accuracy alone.\cite{chuEvaluationPredictionPunctuality2023} similarly used Random Forest regression to improve arrival-time prediction in the Hong Kong port context, substantially reducing forecast error relative to reported ETA. This branch has since become more feature-rich and ensemble-oriented. \cite{kolleyRobustBerthScheduling2022} integrated machine-learned ETA prediction into robust berth scheduling, emphasizing that better ETA models should ultimately improve planning resilience rather than only pointwise forecast quality. \cite{leiPredictingVesselArrival2024} showed that tree-based stacking can effectively absorb inland-waterway factors such as water depth and traffic flow, while \cite{chuVesselArrivalTime2025} fused port call records with AIS trajectories through time-aligned feature construction and stacking to improve vessel arrival-time prediction. \cite{saberHighaccuracyPredictionVessels2025} pushed this line further by combining Extra Trees, AutoGluon Tabular, LightGBM, and a Random Forest meta-learner in a hybrid stacking framework that achieved very strong predictive accuracy. Overall, this body of work indicates that machine-learning-based ETA research has progressed from single-model regression toward structured feature engineering, multi-source fusion, and stacked ensemble learning, with operational and environmental covariates becoming increasingly central to model design.
+\subsection{ETA Prediction Based on Feature Engineering}
+A second and now highly influential branch treats ETA prediction as a supervised learning problem over AIS variables, vessel characteristics, and operational features. Yu et al.~\cite{yuShipArrivalPrediction2018} provided an early example by comparing BP, CART, and Random Forest models for ship arrival prediction and then linking the resulting forecasts to berth allocation and quay crane scheduling, thereby showing that ETA prediction has operational value beyond statistical accuracy alone. Chu et al.~\cite{chuEvaluationPredictionPunctuality2023} similarly used Random Forest regression to improve arrival-time prediction in the Hong Kong port context, substantially reducing forecast error relative to reported ETA. This branch has since become more feature-rich and ensemble-oriented. Kolley et al.~\cite{kolleyRobustBerthScheduling2022} integrated machine-learned ETA prediction into robust berth scheduling, emphasizing that better ETA models should ultimately improve planning resilience rather than only pointwise forecast quality. Lei et al.~\cite{leiPredictingVesselArrival2024} showed that tree-based stacking can effectively absorb inland-waterway factors such as water depth and traffic flow, while Chu et al.~\cite{chuVesselArrivalTime2025} fused port call records with AIS trajectories through time-aligned feature construction and stacking to improve vessel arrival-time prediction. Saber et al.~\cite{saberHighaccuracyPredictionVessels2025} pushed this line further by combining Extra Trees, AutoGluon Tabular, LightGBM, and a Random Forest meta-learner in a hybrid stacking framework that achieved very strong predictive accuracy. Overall, this body of work indicates that machine-learning-based ETA research has progressed from single-model regression toward structured feature engineering, multi-source fusion, and stacked ensemble learning, with operational and environmental covariates becoming increasingly central to model design.
 
-\subsection{Research gaps in existing ETA prediction studies}
-Although tree-based and feature-engineering-based methods have achieved strong performance in maritime ETA prediction, largely because AIS data provide rich structured variables such as position, speed, heading, and voyage attributes, these approaches remain limited in modeling long-range temporal dependence and dynamic voyage evolution. To overcome this, some recent studies have explored deep learning models, showing that recurrent, convolutional, and segmented sequence frameworks can improve ETA estimation by better capturing local dynamics and temporal heterogeneity \citep{elmekkaouiDeepLearningModels2022,wenzelNeuralNetworkApproach2023,duSegmentedETAPrediction2025}. However, more advanced architectures that can jointly represent sequential evolution and structural dependence, such as graph-enhanced and Transformer-based models, are still rarely studied in direct maritime ETA prediction 
+\subsection{Research Gaps in Existing ETA Prediction Studies}
+Although tree-based and feature-engineering-based methods have achieved strong performance in maritime ETA prediction, largely because AIS data provide rich structured variables such as position, speed, heading, and voyage attributes, these approaches remain limited in modeling long-range temporal dependence and dynamic voyage evolution. To overcome this, some recent studies have explored deep learning models, showing that recurrent, convolutional, and segmented sequence frameworks can improve ETA estimation by better capturing local dynamics and temporal heterogeneity~\cite{elmekkaouiDeepLearningModels2022,wenzelNeuralNetworkApproach2023,duSegmentedETAPrediction2025}. However, more advanced architectures that can jointly represent sequential evolution and structural dependence, such as graph-enhanced and Transformer-based models, are still rarely studied in direct maritime ETA prediction.
 
 \section{Methodology}
 
 \subsection{Problem Formulation}
 
-Given a vessel's historical AIS trajectory $\mathbf{X} = \{x_1, x_2, \ldots, x_T\}$, where each observation $x_t \in \mathbb{R}^{d}$ contains $d$-dimensional navigation and meteorological features at time step $t$, the objective is to predict the remaining sailing time $\hat{y} \in \mathbb{R}^{+}$ until the vessel reaches its destination port.
-
-We decompose the total ETA into two components:
-\begin{equation}
-    \text{ETA}_{\text{total}} = \hat{y}_{\text{sail}} + \hat{y}_{\text{port}}
-    \label{eq:decomposition}
-\end{equation}
-where $\hat{y}_{\text{sail}}$ denotes the predicted open-sea sailing time and $\hat{y}_{\text{port}}$ denotes the predicted port-dwell time.
-This decomposition is motivated by the observation that sailing dynamics (governed by vessel speed, currents, and weather) and port operations (governed by berth availability, cargo handling, and congestion) are driven by fundamentally different factors.
+Given a vessel's historical AIS trajectory $\mathbf{X} = \{x_1, x_2, \ldots, x_T\}$, where each observation $x_t \in \mathbb{R}^{d}$ contains $d$-dimensional navigation and meteorological features at time step $t$, the objective is to predict the remaining sailing time $\hat{y} \in \mathbb{R}^{+}$ to the end of the current voyage segment---i.e., the time until the vessel completes its active open-sea transit and arrives at its next port of call.
+We focus exclusively on the in-transit sailing phase, where the vessel's dynamics are governed by speed, heading, ocean currents, and weather conditions. Port-dwell time (berth waiting, cargo handling, customs processing) is excluded from the prediction target because it depends on logistical factors that are unobservable from AIS data alone.
 
 \subsection{System Architecture}
 
-The prediction system consists of three stages, as illustrated in Fig.~\ref{fig:architecture}:
+The prediction system consists of two stages, as illustrated in Fig.~\ref{fig:architecture}:
 
 \begin{enumerate}
     \item \textbf{Data Preprocessing}: Raw AIS records are cleaned, segmented into individual voyages via speed-based port-stop detection, augmented with meteorological features, and organized into fixed-length input sequences.
-    \item \textbf{Sailing Time Prediction}: One of ten candidate models processes the input sequences to predict the remaining sailing time.
-    \item \textbf{Port Dwell Prediction}: A separate MLP model estimates the expected port-dwell time based on destination region, arrival timing, and location features.
+    \item \textbf{Sailing Time Prediction}: One of ten candidate models processes the input sequences to predict the remaining sailing time for the current voyage segment.
 \end{enumerate}
 
 \begin{figure}[t]
     \centering
     \includegraphics[width=\columnwidth]{architecture.pdf}
-    \caption{Overview of the decoupled ETA prediction architecture. A candidate model predicts sailing time from AIS sequences enriched with weather features, while a separate MLP estimates port-dwell time. The final ETA is the sum of both predictions.}
+    \caption{Overview of the ETA prediction architecture. A candidate model predicts remaining sailing time from AIS sequences enriched with weather features.}
     \label{fig:architecture}
 \end{figure}
 
@@ -327,12 +318,6 @@ where $\alpha \in [0, 1]$ balances between fitting ground-truth labels and mimic
 The soft targets encode richer information than hard labels: they capture the ensemble's confidence and implicit uncertainty, acting as a form of label smoothing that regularizes the student model.
 We find that $\alpha = 0.6$ yields the best results (see Section~\ref{sec:kd_ablation}).
 
-\subsection{Port Dwell Time Predictor}
-
-The port-dwell-time predictor is a two-layer MLP ($64 \to 32 \to 1$) with ReLU activation, batch normalization, and 20\% dropout.
-It takes as input the destination port region (one-hot encoded among six predefined regions), arrival coordinates, and cyclically encoded temporal features (month and weekday as sine/cosine pairs).
-This model is shared across all sailing-time predictors and is not part of the architecture comparison.
-
 
 %==============================================================
 \section{Experiments}
@@ -397,8 +382,8 @@ Data loading employs memory-mapped arrays (NumPy memmap) to handle the 13M+ trai
 We report the following metrics on the test set:
 
 \begin{itemize}
-    \item \textbf{MAE} (Mean Absolute Error, in hours): $\frac{1}{N}\sum_{i}|\hat{y}_i - y_i|$
-    \item \textbf{RMSE} (Root Mean Squared Error, in hours): $\sqrt{\frac{1}{N}\sum_{i}(\hat{y}_i - y_i)^2}$
+    \item \textbf{MAE} (Mean Absolute Error, in hours): $\frac{1}{N}\sum_{i}|\hat{y}_i - y_i|$.
+    \item \textbf{RMSE} (Root Mean Squared Error, in hours): $\sqrt{\frac{1}{N}\sum_{i}(\hat{y}_i - y_i)^2}$.
     \item \textbf{MAPE} (Mean Absolute Percentage Error, \%): computed only on samples where $y_i > 24$ hours, to avoid division-by-zero artifacts on near-arrival predictions.
 \end{itemize}
 
@@ -425,7 +410,7 @@ Fig.~\ref{fig:baseline_comparison} provides a visual comparison.
         \multirow{2}{*}{Convolutional} & 1D-CNN & 16.08 & 27.53 & 9.90 \\
         & TCN & 17.19 & 28.13 & 10.95 \\
         \midrule
-        Tree & XGBoost & 15.14 & \underline{26.05} & 9.33 \\
+        Tree & XGBoost & 15.14 & \textbf{26.05} & 9.33 \\
         \midrule
         \multirow{3}{*}{Attention} & Transformer & 18.12 & 29.78 & 10.67 \\
         & Conv-Trans. & 16.60 & 27.52 & 10.07 \\
@@ -434,9 +419,9 @@ Fig.~\ref{fig:baseline_comparison} provides a visual comparison.
         \multirow{7}{*}{Graph} & MSTGN-MLP & 15.40 & 26.57 & 9.50 \\
         & StatMLP & 15.41 & 27.08 & 9.43 \\
         & MSTGN-Late & 15.56 & 26.74 & 9.68 \\
-        & MSTGN-MLP2 & 15.28 & 26.58 & \underline{9.33} \\
-        & MSTGN-Ens7 & \textbf{14.95} & \textbf{26.08} & \textbf{9.16} \\
-        & \underline{MSTGN-KD} & \underline{15.13} & \underline{26.16} & \underline{9.33} \\
+        & MSTGN-MLP2 & 15.28 & 26.58 & 9.33 \\
+        & MSTGN-Ens7 & \textbf{14.95} & \underline{26.08} & \textbf{9.16} \\
+        & \underline{MSTGN-KD} & \underline{15.13} & 26.16 & \underline{9.33} \\
         \bottomrule
     \end{tabular}
 \end{table}
@@ -450,29 +435,93 @@ Fig.~\ref{fig:baseline_comparison} provides a visual comparison.
 
 \subsubsection{Key Findings}
 
-\paragraph{Finding 1: XGBoost is the strongest single model.}
-Among single models, XGBoost achieves MAE = 15.14\,h, RMSE = 26.05\,h, and MAPE = 9.33\%, outperforming all individual neural models.
-This aligns with recent findings in time-series forecasting~\cite{zeng2023transformers} that tabular models can rival complex architectures when strong engineered features are available.
-
-\paragraph{Finding 2: MSTGN-KD surpasses XGBoost as a single model.}
+\paragraph{MSTGN-KD surpasses XGBoost as a single model}
 Our enriched MSTGN-MLP2, trained with ensemble knowledge distillation ($\alpha = 0.6$), achieves MAE = 15.13\,h, surpassing XGBoost (15.14\,h) with a \textit{single model} at inference.
 The teacher ensemble (MSTGN-Ens7, top-7 of 15 seeds) achieves 14.95\,h, the best overall result.
 Crucially, knowledge distillation transfers 89\% of the ensemble's improvement ($15.28 \to 15.13$\,h) into one 273K-parameter model, eliminating the need for multi-model inference.
 The base MSTGN-MLP2 (15.28\,h) already surpasses MSTGN-MLP (15.40\,h) through enriched features, and the knowledge distillation step closes the remaining gap to XGBoost.
 
-\paragraph{Finding 3: Statistical features dominate over temporal modeling.}
+\paragraph{Statistical features dominate over temporal modeling}
 The StatMLP ablation (15.41\,h), which uses statistical features without graph information, matches MSTGN-MLP within 0.01\,h.
 Meanwhile, all GRU-based models (GRU: 16.03, MSTGN-GRU: 16.06\,h) underperform the statistical baselines by ${\sim}0.6$\,h.
 This reveals that compact statistical summaries (last-step, mean, std, delta) capture nearly all information that sequence models attempt to learn, while avoiding temporal noise that degrades GRU performance.
 
-\paragraph{Finding 4: Attention-based models do not justify their complexity.}
+\paragraph{Attention-based models do not justify their complexity}
 The Vanilla Transformer (18.12\,h MAE, 1.6M params) performs worst among the neural models.
 The Informer (16.20\,h, 11.3M params) and Conv-Transformer (16.60\,h, 1.2M params) lag behind the simpler MLP (15.73\,h, 270K params).
 These architectures, designed for long-horizon multi-step forecasting, appear unnecessary for the single-step prediction task considered here ($L_{\text{pred}} = 1$).
 
-\paragraph{Finding 5: Graph structure provides marginal but consistent improvement.}
+\paragraph{Graph structure provides marginal but consistent improvement}
 Across all matched comparisons, adding GCN cell embeddings yields small but positive gains: MSTGN-MLP (15.40\,h) vs.\ StatMLP (15.41\,h), and MSTGN-LateFusion (15.56\,h) vs.\ GRU (16.03\,h).
 The limited magnitude of improvement suggests that latitude and longitude features already encode most positional information, leaving the graph structure to capture only residual route-level context.
+
+\subsubsection{Prediction Quality Analysis}
+
+Fig.~\ref{fig:analysis} provides a detailed characterization of the best single model (MSTGN-KD, $\alpha{=}0.6$).
+Panel~(a) shows strong agreement between predicted and actual remaining time across the full range, with the densest concentration along the diagonal for voyages under 350\,h.
+Panel~(b) reveals that MAE increases monotonically with true remaining time: predictions within the first day achieve MAE~$< 3$\,h, while voyages beyond 14 days (336\,h) exhibit MAE~$> 25$\,h, consistent with the compounding uncertainty of long-horizon prediction.
+Panel~(c) shows the error distribution is approximately symmetric with a slight negative bias (mean error $= -2.56$\,h, median $= +1.18$\,h), indicating no systematic over- or underestimation for the majority of predictions.
+Panel~(d) presents the cumulative accuracy curve: 50\% of predictions fall within 8.3\,h of the true value, 90\% within 35.2\,h, and 95\% within 51.4\,h.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\textwidth]{analysis_plots.pdf}
+    \caption{Prediction quality analysis of the best single model (MSTGN-KD, $\alpha{=}0.6$, MAE~$=$~15.13\,h) on the test set (2.86M samples). (a)~Predicted vs.\ actual remaining time (hexbin density); (b)~MAE stratified by true remaining voyage time; (c)~error distribution histogram; (d)~cumulative fraction of predictions within a given absolute error threshold.}
+    \label{fig:analysis}
+\end{figure*}
+
+
+\subsection{Comparison with Existing Maritime ETA Methods}
+
+Table~\ref{tab:lit_comparison} situates our work among recent vessel ETA prediction studies.
+Direct numerical comparison across studies is infeasible because each uses a different dataset, route network, prediction horizon, and evaluation protocol.
+We therefore present a qualitative positioning that highlights the methodological scope and scale of each study.
+
+\begin{table*}[t]
+    \centering
+    \caption{Comparison with existing maritime ETA prediction studies. ``Dist.''~denotes the approximate sailing distance covered by the dataset. Metrics are as reported by the original authors and are \textbf{not directly comparable} due to differences in route type, prediction granularity, and evaluation protocol.}
+    \label{tab:lit_comparison}
+    \footnotesize
+    \setlength{\tabcolsep}{3pt}
+    \renewcommand{\arraystretch}{1.15}
+    \begin{tabular}{P{2.5cm} P{1.5cm} P{1.7cm} P{1.5cm} P{1.2cm} P{2.0cm} P{3.8cm}}
+        \toprule
+        \textbf{Study} & \textbf{Route type} & \textbf{Dist.\ (NM)} & \textbf{Voyages} & \textbf{Models} & \textbf{Best method} & \textbf{Reported result} \\
+        \midrule
+        Yu et al.~\cite{yuShipArrivalPrediction2018} & Port call & Short & --- & 3 & RF & Classification-based ETA \\
+        Chu et al.~\cite{chuEvaluationPredictionPunctuality2023} & Hong Kong port & Short & --- & 4 & RF & Improved over vessel-reported ETA \\
+        Kolley et al.~\cite{kolleyRobustBerthScheduling2022} & European port & Short & --- & 4 & KNN & Integration with berth scheduling \\
+        El~Mekkaoui et al.~\cite{elmekkaouiDeepLearningModels2022} & Bulk port & Short--Med. & --- & 4 & LSTM & First bulk-port DL benchmark \\
+        Wenzel et al.~\cite{wenzelNeuralNetworkApproach2023} & Inland waterway & Short & --- & 4 & LSTM & ANN with A* path estimation \\
+        Du et al.~\cite{duSegmentedETAPrediction2025} & Pilotage area & Short & --- & 4 & TCN & Segmented CNN-LSTM method \\
+        Lei et al.~\cite{leiPredictingVesselArrival2024} & Inland waterway & Short & --- & 4 & LightGBM & Tree-based stacking \\
+        Saber et al.~\cite{saberHighaccuracyPredictionVessels2025} & Seaport & Med. & --- & 4+ & ET+LGB stack & Hybrid stacking, high accuracy \\
+        Chu et al.~\cite{chuVesselArrivalTime2025} & Multi-port & Med. & --- & 5+ & Stacked ens. & Port call + AIS fusion \\
+        Lloret-Batlle et al.~\cite{lloretbatlle2025} & Cross-Pacific & ${\sim}5{,}500$ & --- & 1 & ANN & MAE $\approx$ 4\,h at 1{,}500\,NM from port \\
+        \midrule
+        \textbf{This work} & \textbf{Cross-Pacific} & $\boldsymbol{\sim}$\textbf{5,500} & \textbf{9,087} & \textbf{16} & \textbf{MSTGN-KD} & \textbf{MAE = 15.13\,h (full voyage)} \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+Several key differences distinguish this work from the existing literature:
+
+\textbf{(1)~Scale of benchmark.}
+Most prior studies compare 3--5 models within a single architectural family.
+We evaluate 16 configurations spanning six families (feedforward, recurrent, convolutional, attention, tree-based, and graph-based) under strictly identical conditions, providing---to our knowledge---the most comprehensive controlled benchmark for maritime ETA prediction.
+
+\textbf{(2)~Full-voyage prediction scope.}
+The majority of existing studies focus on port-area or last-mile ETA prediction, where the vessel is already near its destination.
+For example, Lloret-Batlle et al.~\cite{lloretbatlle2025} report MAE~$\approx$~4\,h when the vessel is within 1,500~NM of port on cross-Pacific routes---a setting where substantial uncertainty has already been resolved.
+In contrast, our model predicts remaining sailing time \textit{at any point during the voyage}, including early-voyage predictions where the vessel may still be 5,000+~NM from its destination, which is inherently more challenging and results in higher absolute error.
+
+\textbf{(3)~Controlled experimental conditions.}
+Prior studies often differ in their choice of loss function, optimizer, data split, feature set, and normalization, making it difficult to isolate the effect of model architecture.
+Our evaluation uses a single unified protocol (identical splits, features, loss, optimizer, and early-stopping criteria) to ensure that all performance differences arise solely from architectural choices.
+
+\textbf{(4)~Knowledge distillation for deployment.}
+While ensemble methods have been explored in maritime ETA~\cite{saberHighaccuracyPredictionVessels2025,chuVesselArrivalTime2025}, these approaches require running multiple models at inference time.
+Our ensemble knowledge distillation framework compresses a 15-seed teacher ensemble into a single student model that achieves comparable accuracy (15.13 vs.\ 14.95\,h), providing a practical deployment advantage.
 
 
 \subsection{Ablation Studies}
@@ -487,12 +536,14 @@ This confirms that en-route weather conditions provide complementary information
     \centering
     \caption{Ablation: Effect of Weather Features (Informer)}
     \label{tab:ablation_weather}
+    \footnotesize
     \begin{tabular}{lccc}
         \toprule
-        \textbf{Features} & \textbf{MAE (h)} & $\Delta$\textbf{MAE (h)} & $\Delta$\textbf{MAE (\%)} \\
+        \textbf{Features} & \textbf{MAE} & $\Delta$\textbf{MAE} & $\Delta$\textbf{MAE} \\
+        & \textbf{(h)} & \textbf{(h)} & \textbf{(\%)} \\
         \midrule
-        Navigation only ($d=6$) & 17.43 & -- & -- \\
-        Navigation + Weather ($d=11$) & \textbf{16.20} & $-1.23$ & $-7.1\%$ \\
+        Nav.\ only ($d=6$) & 17.43 & -- & -- \\
+        Nav.\ + Weather ($d=11$) & \textbf{16.20} & $-1.23$ & $-7.1\%$ \\
         \bottomrule
     \end{tabular}
 \end{table}
@@ -597,20 +648,6 @@ Similarly, iterative distillation (using the KD-trained model as teacher for a s
 Longer training (25 epochs, patience 6) exactly reproduces the standard result (15.13\,h), indicating the gain is not training-length-dependent.
 These results demonstrate that ensemble KD provides a principled way to compress ensemble knowledge into a single deployable model that surpasses XGBoost.
 
-\subsubsection{Training Dynamics}
-
-Fig.~\ref{fig:training_curve} shows the training and validation loss curves for the Informer.
-The model achieves its best validation loss at epoch 2 (val loss = 0.0194), after which validation loss begins to increase while training loss continues to decrease, indicating the onset of overfitting.
-Early stopping triggers at epoch 5 (patience = 3).
-
-\begin{figure}[t]
-    \centering
-    \includegraphics[width=0.85\columnwidth]{training_curve.pdf}
-    \caption{Informer training and validation loss curves. The best model is selected at epoch 2; training beyond this point leads to overfitting.}
-    \label{fig:training_curve}
-\end{figure}
-
-
 \subsection{Large Deviation Analysis}
 \label{sec:large_dev}
 
@@ -624,14 +661,14 @@ Table~\ref{tab:large_dev_profile} profiles these deviations across voyage durati
     \label{tab:large_dev_profile}
     \begin{tabular}{lrrrr}
         \toprule
-        \textbf{Duration bin} & \textbf{Samples} & \textbf{MAE (h)} & \textbf{$>$100\,h rate} \\
+        \textbf{Duration bin (h)} & \textbf{Samples} & \textbf{MAE (h)} & \textbf{$>$100\,h rate} \\
         \midrule
-        $[0, 24)$\,h     & 324,006  & 2.45  & 0.000\% \\
-        $[24, 72)$\,h    & 409,819  & 6.52  & 0.045\% \\
-        $[72, 168)$\,h   & 743,545  & 10.66 & 0.225\% \\
-        $[168, 336)$\,h  & 980,279  & 19.71 & 1.649\% \\
-        $[336, 504)$\,h  & 384,803  & 28.48 & 3.270\% \\
-        $[504, 720)$\,h  & 17,436   & 92.06 & \textbf{36.24\%} \\
+        $[0, 24)$     & 324,006  & 2.45  & 0.000\% \\
+        $[24, 72)$    & 409,819  & 6.52  & 0.045\% \\
+        $[72, 168)$   & 743,545  & 10.66 & 0.225\% \\
+        $[168, 336)$  & 980,279  & 19.71 & 1.649\% \\
+        $[336, 504)$  & 384,803  & 28.48 & 3.270\% \\
+        $[504, 720)$  & 17,436   & 92.06 & \textbf{36.24\%} \\
         \midrule
         \textbf{Overall}  & 2,859,888 & 15.13 & 1.291\% \\
         \bottomrule
@@ -694,32 +731,6 @@ Combined with LDS training, this two-stage approach achieves the lowest large-de
 The consistent finding across all strategies is that reducing tail errors for the $< 1\%$ of ultra-long voyages requires shifting predictions upward, which necessarily degrades accuracy for the $> 99\%$ of shorter voyages.
 This MAE--reliability trade-off is a fundamental consequence of the skewed voyage duration distribution and the log-space training objective, and suggests that \textbf{practical deployment should adopt duration-aware confidence intervals rather than seeking a single point estimator} that satisfies both the head and the tail of the distribution.
 
-
-%==============================================================
-\section{Related Work}
-%==============================================================
-
-\paragraph{Vessel ETA Prediction.}
-Machine learning approaches to vessel ETA prediction have evolved from traditional methods (SVR~\cite{liu2019svr}, Random Forest~\cite{zhang2019rf}) to deep learning architectures.
-Zhang et al.~\cite{zhang2022lstm} applied LSTM-GAN to ship trajectory prediction, while Han et al.~\cite{han2021gru} proposed a GRU-based method for vessel trajectory forecasting.
-Dong et al.~\cite{dong2023transformer} introduced a Transformer with position encoding attention for ship trajectory prediction.
-El~Mekkaoui et al.~\cite{elmekkaoui2023} conducted a comprehensive study of deep learning approaches for vessel ETA at bulk ports.
-Lloret-Batlle et al.~\cite{lloretbatlle2025} recently demonstrated ANN-based cross-Pacific vessel ETA prediction using AIS data, achieving MAE of 4 hours at 1,500 nautical miles from port.
-However, most studies evaluate only one or two architectures, making cross-method comparisons difficult.
-
-\paragraph{Graph Neural Networks for Transportation.}
-Hong et al.~\cite{hongHetETAHeterogeneousInformation2020} proposed HetETA, which constructs a heterogeneous road network graph and uses graph attention networks to learn link-level representations for urban travel time estimation.
-Dai et al.~\cite{daiHybridSpatiotemporalGraph2020} introduced the Hybrid Spatio-Temporal Graph Convolutional Network (H-STGCN), combining graph convolutions with temporal modeling for traffic prediction.
-These works demonstrate the effectiveness of graph-based spatial modeling for land transportation, motivating our exploration of maritime route graphs for vessel ETA prediction.
-Unlike road networks, maritime routes lack fixed topology, requiring us to construct a grid-based graph from observed AIS trajectories.
-
-\paragraph{Time-Series Forecasting Benchmarks.}
-The importance of fair benchmarking has been highlighted by Zeng et al.~\cite{zeng2023transformers}, who showed that simple linear models can outperform Transformers for long-horizon time-series forecasting.
-Kim et al.~\cite{kim2025comprehensive} proposed a comprehensive taxonomy classifying deep time-series models into Transformer, CNN, RNN, MLP, SSM, and LLM families, and emphasized the need for standardized evaluation protocols.
-Bai et al.~\cite{bai2018tcn} demonstrated that TCNs provide a strong alternative to recurrent architectures for sequence modeling.
-Our work applies this benchmarking philosophy to the maritime ETA domain.
-
-
 %==============================================================
 \section{Conclusion}
 %==============================================================
@@ -750,14 +761,8 @@ Future work will explore ocean current data integration, multi-step prediction h
 \bibitem{unctad2023}
 UNCTAD, ``Review of Maritime Transport 2023,'' United Nations Conference on Trade and Development, 2023.
 
-\bibitem{park2021}
-K.~Park, J.~Kim, and Y.~Lee, ``Deep learning-based vessel arrival time prediction,'' \textit{J. Marine Sci. Engineering}, vol.~9, no.~10, p.~1107, 2021.
-
 \bibitem{fang2022}
 S.~Fang, R.~Zhu, and Y.~Xu, ``Vessel ETA prediction using AIS data and machine learning,'' \textit{Ocean Engineering}, vol.~261, p.~112079, 2022.
-
-\bibitem{zhang2019rf}
-Z.~Zhang, C.~Yin, and T.~Li, ``A random-forest-based model for ship destination prediction,'' \textit{ISPRS Int. J. Geo-Inf.}, vol.~8, no.~8, p.~367, 2019.
 
 \bibitem{liu2019svr}
 L.~Liu, Y.~Zhang, and Z.~Guo, ``Ship trajectory prediction based on SVR optimized by ACDE,'' \textit{J. Coastal Res.}, vol.~94, pp.~52--56, 2019.
@@ -773,12 +778,6 @@ D.~Dong, W.~Li, and P.~Liu, ``Ship trajectory prediction based on Transformer wi
 
 \bibitem{zhou2021informer}
 H.~Zhou, S.~Zhang, J.~Peng, S.~Zhang, J.~Li, H.~Xiong, and W.~Zhang, ``Informer: Beyond efficient Transformer for long sequence time-series forecasting,'' in \textit{Proc. AAAI Conf. Artif. Intell.}, vol.~35, no.~12, pp.~11106--11115, 2021.
-
-\bibitem{xiong2024informertp}
-C.~Xiong, H.~Shi, J.~Li, X.~Wu, and R.~Gao, ``Informer-based model for long-term ship trajectory prediction,'' \textit{J. Marine Sci. Engineering}, vol.~12, no.~8, p.~1269, 2024.
-
-\bibitem{kingma2015adam}
-D.~P.~Kingma and J.~Ba, ``Adam: A method for stochastic optimization,'' in \textit{Proc. Int. Conf. Learn. Representations (ICLR)}, 2015.
 
 \bibitem{hochreiter1997lstm}
 S.~Hochreiter and J.~Schmidhuber, ``Long short-term memory,'' \textit{Neural Computation}, vol.~9, no.~8, pp.~1735--1780, 1997.
@@ -813,9 +812,6 @@ R.~Lloret-Batlle, R.~Mounce, and J.~Sherwood, ``Cross-Pacific vessel estimated t
 \bibitem{hinton2015distilling}
 G.~Hinton, O.~Vinyals, and J.~Dean, ``Distilling the knowledge in a neural network,'' \textit{arXiv preprint arXiv:1503.02531}, 2015.
 
-\bibitem{chenMaritimeTrafficSituation2023}
-X.~Chen, J.~Zheng, C.~Li, B.~Wu, H.~Wu, and J.~Montewka, ``Maritime Traffic Situation Awareness Analysis via High-Fidelity Ship Imaging Trajectory,'' \textit{Multimedia Tools and Applications}, vol.~83, no.~16, pp.~48907--48923, 2023. doi: 10.1007/s11042-023-17456-6.
-
 \bibitem{chuEvaluationPredictionPunctuality2023}
 Z.~Chu, R.~Yan, and S.~Wang, ``Evaluation and Prediction of Punctuality of Vessel Arrival at Port: A Case Study of Hong Kong,'' \textit{Maritime Policy \& Management}, vol.~51, no.~6, pp.~1096--1124, 2023. doi: 10.1080/03088839.2023.2217168.
 
@@ -828,17 +824,8 @@ R.~Dai, S.~Xu, Q.~Gu, C.~Ji, and K.~Liu, ``Hybrid Spatio-Temporal Graph Convolut
 \bibitem{duSegmentedETAPrediction2025}
 L.~Du, J.~Xiu, O.~A.~Valdez Banda, M.~Zhang, F.~Zhang, and Y.~Wen, ``A Segmented ETA Prediction Method for Inland Vessels Based on Improved DEKM and CNN-LSTM Algorithms,'' \textit{Ocean Engineering}, vol.~342, p.~122694, 2025. doi: 10.1016/j.oceaneng.2025.122694.
 
-\bibitem{efronPredictionEstimationAttribution2020}
-B.~Efron, ``Prediction, Estimation, and Attribution,'' \textit{International Statistical Review}, vol.~88, no.~S1, p.~S28-S59, 2020. doi: 10.1111/insr.12409.
-
 \bibitem{elmekkaouiDeepLearningModels2022}
 S.~El~Mekkaoui, L.~Benabbou, and A.~Berrado, ``Deep Learning Models for Vessel's ETA Prediction: Bulk Ports Perspective,'' \textit{Flexible Services and Manufacturing Journal}, vol.~35, no.~1, pp.~5--28, 2022. doi: 10.1007/s10696-022-09471-w.
-
-\bibitem{EnhancingContainerVessela}
-``Enhancing Container Vessel Arrival Time Prediction through Past Voyage Route Modeling: A Case Study of Busan New Port - Nanyang Technological University,'' https://ntu-sp.primo.exlibrisgroup.com,
-
-\bibitem{filomApplicationsMachineLearning2022}
-S.~Filom, A.~M.~Amiri, and S.~Razavi, ``Applications of Machine Learning Methods in Port Operations -- A Systematic Literature Review,'' \textit{Transportation Research Part E: Logistics and Transportation Review}, vol.~161, p.~102722, 2022. doi: 10.1016/j.tre.2022.102722.
 
 \bibitem{hongHetETAHeterogeneousInformation2020}
 H.~Hong, Y.~Lin, X.~Yang, Z.~Li, K.~Fu, Z.~Wang, X.~Qie, and J.~Ye, ``HetETA: Heterogeneous Information Network Embedding for Estimating Time of Arrival,'' in \textit{Proceedings of the 26th ACM SIGKDD International Conference on Knowledge Discovery \& Data Mining}, Virtual Event CA USA, pp.~2444--2454, Aug. 2020. doi: 10.1145/3394486.3403294.
@@ -852,18 +839,6 @@ L.~Kolley, N.~R{\"u}ckert, M.~Kastner, C.~Jahn, and K.~Fischer, ``Robust Berth S
 \bibitem{leiPredictingVesselArrival2024}
 J.~Lei, Z.~Chu, Y.~Wu, X.~Liu, M.~Luo, W.~He, and C.~Liu, ``Predicting Vessel Arrival Times on Inland Waterways: A Tree-Based Stacking Approach,'' \textit{Ocean Engineering}, vol.~294, p.~116838, 2024. doi: 10.1016/j.oceaneng.2024.116838.
 
-\bibitem{liMultimodalFusionShip2026}
-Y.~Li, Y.~Bai, Q.~Mei, P.~Wang, Y.~Hu, Q.~Yan, and S.~Wang, ``Multimodal Fusion via Ship Trajectory Understanding for Cognitive Maritime Intelligence: A Case Study of the Fujian Sea,'' \textit{Ocean Engineering}, vol.~350, p.~124237, 2026. doi: 10.1016/j.oceaneng.2026.124237.
-
-\bibitem{linResearchShipDynamic2025}
-S.~Lin, Y.~Li, Y.~Hu, J.~Shi, S.~Wang, P.~Wang, Q.~Mei, X.~Li, and H.~Wei, ``Research on Ship Dynamic Feature Extraction and Prediction Method Based on Visual Data,'' \textit{Ocean Engineering}, vol.~327, p.~120938, 2025. doi: 10.1016/j.oceaneng.2025.120938.
-
-\bibitem{meiStructuralAnalysisVulnerability2024}
-Q.~Mei, H.~Qinyou, Y.~Hu, Y.~Yang, X.~Liu, Z.~Huang, and P.~Wang, ``Structural Analysis and Vulnerability Assessment of the European LNG Maritime Supply Chain Network (2018--2020),'' \textit{Ocean \& Coastal Management}, vol.~253, p.~107126, 2024.
-
-\bibitem{nguyenTrAISformerTransformerNetwork2024}
-D.~Nguyen and R.~Fablet, ``TrAISformer -- a Transformer Network with Sparse Augmented Data Representation and Cross Entropy Loss for AIS-based Vessel Trajectory Prediction,'' https://ieeexplore.ieee.org/document/10380549/, 2024.
-
 \bibitem{nomanReviewVesselTime2025}
 A.~A.~Noman, A.~Heuermann, S.~Wiesner, and K.~D.~Thoben, ``A Review of Vessel Time of Arrival Prediction on Waterway Networks: Current Trends, Open Issues, and Future Directions,'' \textit{Computers}, vol.~14, no.~2, p.~41, 2025. doi: 10.3390/computers14020041.
 
@@ -873,17 +848,8 @@ K.~Park, S.~Sim, and H.~Bae, ``Vessel Estimated Time of Arrival Prediction Syste
 \bibitem{saberHighaccuracyPredictionVessels2025}
 S.~M.~Saber, K.~Z.~Thowai, M.~A.~Rahman, M.~M.~Hassan, A.~B.~M.~M.~Bari, and A.~Raihan, ``High-Accuracy Prediction of Vessels' Estimated Time of Arrival in Seaports: A Hybrid Machine Learning Approach,'' \textit{Maritime Transport Research}, vol.~8, p.~100133, 2025. doi: 10.1016/j.martra.2025.100133.
 
-\bibitem{wangIntelligentPortLogistics2025}
-P.~Wang, Q.~Hu, Q.~Mei, S.~Wang, Y.~Yang, D.~Guo, X.~Liu, W.~Hu, and J.~Chen, ``Intelligent Port Logistics: A Spatiotemporal Knowledge Graph and AI-agent Framework for Berth Allocation,'' \textit{Advanced Engineering Informatics}, vol.~68, p.~103633, 2025. doi: 10.1016/j.aei.2025.103633.
-
 \bibitem{wenzelNeuralNetworkApproach2023}
 P.~Wenzel, R.~Jovanovic, and F.~Schulte, ``A Neural Network Approach for ETA Prediction in Inland Waterway Transport,'' in \textit{Computational Logistics}, Cham, pp.~219--232, 2023. doi: 10.1007/978-3-031-43612-3\_13.
-
-\bibitem{wenzelNeuralNetworkApproach2023a}
-P.~Wenzel, R.~Jovanovic, and F.~Schulte, ``A Neural Network Approach for ETA Prediction in Inland Waterway Transport,'' in \textit{Computational Logistics}, ed. J.~R.~Daduna, G.~Liedtke, X.~Shi, and S.~Vo{\ss}, vol.~14239, pp.~219--232, Cham: Springer Nature Switzerland, 2023. doi: 10.1007/978-3-031-43612-3\_13.
-
-\bibitem{xieAISDatadrivenMaritime2025}
-Z.~Xie, E.~Tu, X.~Fu, G.~Yuan, and Y.~Han, ``AIS Data-Driven Maritime Monitoring Based on Transformer: A Comprehensive Review,'' 2025.
 
 \bibitem{yangHarnessingPowerMachine2024}
 Y.~Yang, Y.~Liu, G.~Li, Z.~Zhang, and Y.~Liu, ``Harnessing the Power of Machine Learning for AIS Data-Driven Maritime Research: A Comprehensive Review,'' \textit{Transportation Research Part E: Logistics and Transportation Review}, vol.~183, p.~103426, 2024. doi: 10.1016/j.tre.2024.103426.
