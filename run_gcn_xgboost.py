@@ -168,13 +168,13 @@ def main():
     X_train, y_train = get_features('train')
     X_val, y_val = get_features('val')
     X_test, y_test = get_features('test')
-    print(f"Feature shape: {X_train.shape}  (stat={85}, gcn={96})")
+    print(f"Feature shape: {X_train.shape}  (stat=81, gcn=96)")
 
     # ---- Baseline: same stats without GCN ----
-    print("\n--- Training XGBoost (Stats only, 85-dim) ---")
-    dtrain_stat = xgb.DMatrix(X_train[:, :85], label=y_train)
-    dval_stat = xgb.DMatrix(X_val[:, :85], label=y_val)
-    dtest_stat = xgb.DMatrix(X_test[:, :85])
+    print("\n--- Training XGBoost (Stats only, 81-dim) ---")
+    dtrain_stat = xgb.DMatrix(X_train[:, :81], label=y_train)
+    dval_stat = xgb.DMatrix(X_val[:, :81], label=y_val)
+    dtest_stat = xgb.DMatrix(X_test[:, :81])
 
     params_base = {
         'objective': 'reg:squarederror',
@@ -227,7 +227,7 @@ def main():
     results = {
         'xgb_stats_only': {k: float(v) for k, v in m_stat.items()},
         'xgb_stats_gcn': {k: float(v) for k, v in m.items()},
-        'feature_dims': {'stats': 85, 'gcn': 96, 'combined': 181},
+        'feature_dims': {'stats': 81, 'gcn': 96, 'combined': 177},
         'checkpoint': str(args.ckpt),
         'graph_meta': graph_meta,
     }
@@ -238,7 +238,7 @@ def main():
 
     summary = (
         f"📊 Q3 Ablation: XGBoost + GCN Embeddings\n"
-        f"XGBoost (Stats-only, 85-d): MAE={m_stat['MAE_hours']:.2f}h\n"
+        f"XGBoost (Stats-only, 81-d): MAE={m_stat['MAE_hours']:.2f}h\n"
         f"XGBoost (Stats+GCN, 177-d): MAE={m['MAE_hours']:.2f}h\n"
         f"(MSTGN-MLP2 w/ KD: 15.13h for reference)"
     )

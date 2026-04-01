@@ -745,23 +745,23 @@ Results will be reported after experiments on server complete.
 
 A key reviewer question is whether MSTGN-MLP2's advantage over XGBoost stems from the \textit{graph information} itself or from the \textit{neural fusion head} (a deep MLP trained end-to-end with backpropagation).
 To isolate these contributions, we conduct the following experiment:
-we extract the learned GCN cell embeddings from the trained MSTGN-MLP2 checkpoint, then train a new XGBoost model using the same 85-dimensional statistical feature set plus the 96-dimensional GCN context features (current cell, origin cell, route mean embedding), yielding a 181-dimensional feature vector.
+we extract the learned GCN cell embeddings from the trained MSTGN-MLP2 checkpoint, then train a new XGBoost model using the same 81-dimensional statistical feature set plus the 96-dimensional GCN context features (current cell, origin cell, route mean embedding), yielding a 177-dimensional feature vector.
 
 Table~\ref{tab:ablation_gcn_xgb} compares four configurations.
 
 \begin{table}[t]
     \centering
-    \caption{Ablation: Isolating Graph Information from Neural Fusion Head. ``Stats'' refers to 85-dim statistical features (same aggregations as MSTGN-MLP2); ``GCN'' refers to 96-dim GCN cell embeddings (current + origin + route mean).}
+    \caption{Ablation: Isolating Graph Information from Neural Fusion Head. ``Stats'' refers to 81-dim statistical features (same aggregations as MSTGN-MLP2); ``GCN'' refers to 96-dim GCN cell embeddings (current + origin + route mean).}
     \label{tab:ablation_gcn_xgb}
     \begin{tabular}{lccccc}
         \toprule
         \textbf{Model} & \textbf{Stats} & \textbf{GCN} & \textbf{Neural head} & \textbf{MAE (h)} & \textbf{RMSE (h)} \\
         \midrule
         XGBoost (original)        & 44-d  &             &             & 15.14 & 25.56 \\
-        XGBoost (Stats-only)      & 85-d  &             &             & TBD & TBD \\
-        XGBoost (Stats + GCN)     & 85-d  & \checkmark  &             & TBD & TBD \\
-        MSTGN-MLP2 (no KD)        & 85-d  & \checkmark  & \checkmark  & 15.28 & 26.58 \\
-        MSTGN-MLP2 + KD           & 85-d  & \checkmark  & \checkmark  & \textbf{15.13} & \textbf{26.16} \\
+        XGBoost (Stats-only)      & 81-d  &             &             & TBD & TBD \\
+        XGBoost (Stats + GCN)     & 81-d  & \checkmark  &             & TBD & TBD \\
+        MSTGN-MLP2 (no KD)        & 81-d  & \checkmark  & \checkmark  & 15.28 & 26.58 \\
+        MSTGN-MLP2 + KD           & 81-d  & \checkmark  & \checkmark  & \textbf{15.13} & \textbf{26.16} \\
         \bottomrule
     \end{tabular}
 \end{table}

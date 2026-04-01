@@ -107,7 +107,7 @@ if xgb_results:
     m_gcn = xgb_results.get('xgb_stats_gcn', {})
     msg += (
         f"\nQ3 XGBoost Ablation:\n"
-        f"  XGBoost (Stats-only 85d): MAE={m_stat.get('MAE_hours', '?'):.2f}h\n"
+        f"  XGBoost (Stats-only 81d): MAE={m_stat.get('MAE_hours', '?'):.2f}h\n"
         f"  XGBoost (Stats+GCN 177d): MAE={m_gcn.get('MAE_hours', '?'):.2f}h\n"
         f"  MSTGN-MLP2+KD: MAE=15.13h (reference)"
     )
