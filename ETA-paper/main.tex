@@ -14,6 +14,7 @@
 \usepackage[colorlinks=true, allcolors=blue]{hyperref}
 \usepackage{ragged2e}
 \usepackage{tikz}
+\usepackage{comment} 
 \usetikzlibrary{positioning, arrows.meta, fit, backgrounds, calc, shapes.geometric}
 \newcolumntype{P}[1]{>{\RaggedRight\arraybackslash}p{#1}}
 
@@ -76,45 +77,45 @@ Our main contributions are:
 Numerous studies have addressed the issue of vessel arrival uncertainty during voyages by predicting vessel ETA to assist operators in making informed decisions~\cite{yuShipArrivalPrediction2018,chuVesselArrivalTime2025,duSegmentedETAPrediction2025,nomanReviewVesselTime2025}. AIS data provides diverse information on vessel voyages, encompassing static details (e.g., size, name and IMO number), dynamic attributes (e.g., location and heading), and voyage-specific information (e.g., destination and draft). These AIS data can be generated and transmitted at intervals that range from a few seconds to several minutes, providing an extensive and dynamic dataset of vessel movements~\cite{yangHarnessingPowerMachine2024, chuEvaluationPredictionPunctuality2023}. These studies can be broadly categorized into two methodological branches: path/trajectory-based methods, and machine learning and feature-engineering-based methods~\cite{leiPredictingVesselArrival2024}. Each branch offers distinct perspectives on how to model ETA prediction, with varying assumptions about the importance of route structure, feature interactions, and temporal dynamics. In Table~\ref{tab:related_literature}, we summarize recent studies on vessel arrival time prediction, and in the following subsections, we review representative studies from each category to highlight their approaches and findings.
 
 \subsection{ETA Prediction Based on Path Finding}
-Path- and trajectory-based methods form one of the most distinctive branches of maritime ETA research because they preserve explicit spatial structure rather than treating ETA purely as a tabular regression target. K.~Park et al.~\cite{parkVesselEstimatedTime2021} proposed a path-finding-based ETA prediction system that combined AIS-derived route grids, Q-learning-based path search, and MCMC-based speed sampling, showing more stable ETA behavior than a Dijkstra-based baseline, especially over longer sailing distances. J.~H.~Yoon et al.~\cite{yoonEnhancingContainerVessel2023} developed a past-voyage route modeling approach in which representative historical routes were first constructed from prior port calls and then used to map real-time AIS positions and speeds for ETA prediction at Busan New Port. In methodological terms, these studies share the view that ETA accuracy can be improved by explicitly modeling the vessel’s remaining path, route regularity, and progress along historically meaningful trajectories. As summarized by S.~Jiang et al.~\cite{jiangPredictionVesselArrival2025}, such trajectory-oriented approaches are especially valuable when route structure is informative and relatively repeatable, although their robustness may decline when vessels deviate from typical routes or when disruptions weaken the predictive value of historical path patterns.
+Path- and trajectory-based methods form one of the most distinctive branches of maritime ETA research because they preserve explicit spatial structure rather than treating ETA purely as a tabular regression target. K.~Park et al.~\cite{parkVesselEstimatedTime2021} proposed a path-finding-based ETA prediction system that combined AIS-derived route grids, Q-learning-based path search, and MCMC-based speed sampling, showing more stable ETA behavior than a Dijkstra-based baseline, especially over longer sailing distances. J.~H.~Yoon et al.~\cite{yoonEnhancingContainerVessel2023} developed a past-voyage route modeling approach in which representative historical routes were first constructed from prior port calls and then used to map real-time AIS positions and speeds for ETA prediction at Busan New Port. In methodological terms, these studies share the view that ETA accuracy can be improved by explicitly modeling the vessel's remaining path, route regularity, and progress along historically meaningful trajectories. As summarized by S.~Jiang et al.~\cite{jiangPredictionVesselArrival2025}, such trajectory-oriented approaches are especially valuable when route structure is informative and relatively repeatable, although their robustness may decline when vessels deviate from typical routes or when disruptions weaken the predictive value of historical path patterns.
 
 \subsection{ETA Prediction Based on Feature Engineering}
 A second and now highly influential branch treats ETA prediction as a supervised learning problem over AIS variables, vessel characteristics, and operational features. Yu et al.~\cite{yuShipArrivalPrediction2018} provided an early example by comparing BP, CART, and Random Forest models for ship arrival prediction and then linking the resulting forecasts to berth allocation and quay crane scheduling, thereby showing that ETA prediction has operational value beyond statistical accuracy alone. Chu et al.~\cite{chuEvaluationPredictionPunctuality2023} similarly used Random Forest regression to improve arrival-time prediction in the Hong Kong port context, substantially reducing forecast error relative to reported ETA. This branch has since become more feature-rich and ensemble-oriented. Kolley et al.~\cite{kolleyRobustBerthScheduling2022} integrated machine-learned ETA prediction into robust berth scheduling, emphasizing that better ETA models should ultimately improve planning resilience rather than only pointwise forecast quality. Lei et al.~\cite{leiPredictingVesselArrival2024} showed that tree-based stacking can effectively absorb inland-waterway factors such as water depth and traffic flow, while Chu et al.~\cite{chuVesselArrivalTime2025} fused port call records with AIS trajectories through time-aligned feature construction and stacking to improve vessel arrival-time prediction. Saber et al.~\cite{saberHighaccuracyPredictionVessels2025} pushed this line further by combining Extra Trees, AutoGluon Tabular, LightGBM, and a Random Forest meta-learner in a hybrid stacking framework that achieved very strong predictive accuracy. Overall, this body of work indicates that machine-learning-based ETA research has progressed from single-model regression toward structured feature engineering, multi-source fusion, and stacked ensemble learning, with operational and environmental covariates becoming increasingly central to model design.
-\begin{table*}[htbp]
-\centering
-\caption{Summary of related literature.}
-\label{tab:related_literature}
-\footnotesize
-\setlength{\tabcolsep}{4pt}
-\renewcommand{\arraystretch}{1.15}
+% \begin{table*}[htbp]
+% \centering
+% \caption{Summary of related literature.}
+% \label{tab:related_literature}
+% \footnotesize
+% \setlength{\tabcolsep}{4pt}
+% \renewcommand{\arraystretch}{1.15}
 
-\begin{tabular}{P{2.3cm} P{2.0cm} P{2.2cm} P{2.2cm} P{1.5cm} P{3.6cm}}
-\toprule
-\textbf{Article} & \textbf{Scenario category} & \textbf{Compared models} & \textbf{Data source} & \textbf{Best model} & \textbf{Characteristic} \\
-\midrule
-Yu et al. (2018)\cite{yuShipArrivalPrediction2018} & Data engineering & RF, ANN, CART & Port call data, vessel features & RF & Predict ETA using classification approach \\
+% \begin{tabular}{P{2.3cm} P{2.0cm} P{2.2cm} P{2.2cm} P{1.5cm} P{3.6cm}}
+% \toprule
+% \textbf{Article} & \textbf{Scenario category} & \textbf{Compared models} & \textbf{Data source} & \textbf{Best model} & \textbf{Characteristic} \\
+% \midrule
+% Yu et al. (2018)\cite{yuShipArrivalPrediction2018} & Data engineering & RF, ANN, CART & Port call data, vessel features & RF & Predict ETA using classification approach \\
 
-Chu et al. (2024b)\cite{chuEvaluationPredictionPunctuality2023} & Data engineering & RF, ANN, RNN, CART & Port call data, vessel features & RF & ETA prediction based on vessel-reported AIS \\
+% Chu et al. (2024b)\cite{chuEvaluationPredictionPunctuality2023} & Data engineering & RF, ANN, RNN, CART & Port call data, vessel features & RF & ETA prediction based on vessel-reported AIS \\
 
-Lei et al. (2024)\cite{leiPredictingVesselArrival2024} & Data engineering & RF, LSTM, XGBoost, LightGBM & AIS data & LightGBM & Inland ETA prediction with traffic flow integration \\
+% Lei et al. (2024)\cite{leiPredictingVesselArrival2024} & Data engineering & RF, LSTM, XGBoost, LightGBM & AIS data & LightGBM & Inland ETA prediction with traffic flow integration \\
 
-Park et al. (2021)\cite{parkVesselEstimatedTime2021}  & Vessel trajectory & RL & AIS data & RL & Trajectory reconstruction and path finding method \\
+% Park et al. (2021)\cite{parkVesselEstimatedTime2021}  & Vessel trajectory & RL & AIS data & RL & Trajectory reconstruction and path finding method \\
 
-Wenzel et al. (2023)\cite{wenzelNeuralNetworkApproach2023} & Vessel trajectory & ANN, CNN, LSTM, RNN & AIS data & LSTM & Vessel travel distance evaluation with A* algorithm \\
+% Wenzel et al. (2023)\cite{wenzelNeuralNetworkApproach2023} & Vessel trajectory & ANN, CNN, LSTM, RNN & AIS data & LSTM & Vessel travel distance evaluation with A* algorithm \\
 
-Yoon et al. (2023)\cite{yoonEnhancingContainerVessel2023} & Vessel trajectory & Interpolation method & AIS data & Interpolation & ETA prediction using voyage route patterns \\
+% Yoon et al. (2023)\cite{yoonEnhancingContainerVessel2023} & Vessel trajectory & Interpolation method & AIS data & Interpolation & ETA prediction using voyage route patterns \\
 
-El Mekkaoui et al. (2023)\cite{elmekkaouiDeepLearningModels2022} & Vessel trajectory & CNN, LSTM, ANN, RNN & AIS data & LSTM & First bulk vessel ETA prediction study \\
+% El Mekkaoui et al. (2023)\cite{elmekkaouiDeepLearningModels2022} & Vessel trajectory & CNN, LSTM, ANN, RNN & AIS data & LSTM & First bulk vessel ETA prediction study \\
 
-Kolley et al. (2023)\cite{kolleyRobustBerthScheduling2022} & Vessel trajectory & LR, DT, ANN, KNN & AIS data & KNN & Berth scheduling integration evaluation \\
+% Kolley et al. (2023)\cite{kolleyRobustBerthScheduling2022} & Vessel trajectory & LR, DT, ANN, KNN & AIS data & KNN & Berth scheduling integration evaluation \\
 
-Du et al. (2025)\cite{duSegmentedETAPrediction2025} & Vessel trajectory & CNN, LSTM, GRU, TCN & AIS data, pilotage records & TCN & Pilotage area ETA prediction \\
-\bottomrule
-\end{tabular}
-\end{table*}
+% Du et al. (2025)\cite{duSegmentedETAPrediction2025} & Vessel trajectory & CNN, LSTM, GRU, TCN & AIS data, pilotage records & TCN & Pilotage area ETA prediction \\
+% \bottomrule
+% \end{tabular}
+% \end{table*}
 
 \subsection{Research Gaps in Existing ETA Prediction Studies}
-Taken together, the studies reviewed above show that maritime ETA prediction has advanced through both explicit route modeling and increasingly strong feature-engineering pipelines~\cite{parkVesselEstimatedTime2021,yoonEnhancingContainerVessel2023,yuShipArrivalPrediction2018,chuEvaluationPredictionPunctuality2023,kolleyRobustBerthScheduling2022,leiPredictingVesselArrival2024,chuVesselArrivalTime2025,saberHighaccuracyPredictionVessels2025,duSegmentedETAPrediction2025}. However, the existing evidence remains fragmented: many studies are developed for port areas, inland waterways, pilotage zones, or specific multi-port settings, while even cross-Pacific evaluation has often focused on a near-arrival regime rather than the full remaining voyage~\cite{chuEvaluationPredictionPunctuality2023,kolleyRobustBerthScheduling2022,leiPredictingVesselArrival2024,duSegmentedETAPrediction2025,chuVesselArrivalTime2025,lloretbatlle2025}. As a result, it is still difficult to determine whether reported gains from recurrent, convolutional, and other deep sequence models reflect genuine architectural advantages for maritime ETA prediction, or instead arise from differences in route scope, feature construction, and evaluation design~\cite{elmekkaouiDeepLearningModels2022,wenzelNeuralNetworkApproach2023,duSegmentedETAPrediction2025}. A related unresolved issue is whether, for remaining-time prediction over long open-ocean voyages, explicit route information provides substantial predictive value beyond compact feature-based summaries of vessel dynamics and auxiliary covariates~\cite{parkVesselEstimatedTime2021,yoonEnhancingContainerVessel2023,leiPredictingVesselArrival2024,chuVesselArrivalTime2025}. These limitations motivate the present study to examine full-voyage ETA prediction on trans-Pacific routes under a unified experimental protocol and thereby clarify which modeling ingredients are genuinely beneficial for this task.
+The literature reviewed above shows clear progress in maritime ETA prediction, but it does not yet provide a coherent picture of what matters most for full-voyage prediction~\cite{jiangPredictionVesselArrival2025,nomanReviewVesselTime2025}. Existing evidence remains fragmented across port areas, inland waterways, pilotage zones, and near-arrival settings, so reported results are difficult to compare directly and offer limited guidance for remaining-time prediction over long open-ocean voyages. This fragmentation also makes it difficult to tell whether apparent performance gains come from model architecture itself or from differences in route scope, feature design, and evaluation protocol. A further unresolved question is whether explicit route modeling provides substantial value beyond compact feature-based summaries when the task is full-voyage ETA prediction on long trans-Pacific routes. These gaps motivate the present study, which evaluates full-voyage remaining-time prediction under a unified protocol to clarify which modeling ingredients are genuinely useful in this setting.
 
 \section{Methodology}
 
@@ -123,9 +124,217 @@ Taken together, the studies reviewed above show that maritime ETA prediction has
 Given a vessel's historical AIS trajectory $\mathbf{X} = \{x_1, x_2, \ldots, x_T\}$, where each observation $x_t \in \mathbb{R}^{d}$ contains $d$-dimensional navigation and meteorological features at time step $t$, the objective is to predict the remaining sailing time $\hat{y} \in \mathbb{R}^{+}$ to the end of the current voyage segment---i.e., the time until the vessel completes its active open-sea transit and arrives at its next port of call.
 We focus exclusively on the in-transit sailing phase, where the vessel's dynamics are governed by speed, heading, ocean currents, and weather conditions. Port-dwell time (berth waiting, cargo handling, customs processing) is excluded from the prediction target because it depends on logistical factors that are unobservable from AIS data alone.
 
-\subsection{System Architecture}
+% \subsection{System Architecture}
 
-The prediction system consists of two stages, as illustrated in Fig.~\ref{fig:architecture}:
+% The prediction system consists of two stages, as illustrated in Fig.~\ref{fig:architecture}:
+
+% \begin{enumerate}
+%     \item \textbf{Data Preprocessing}: Raw AIS records are cleaned, segmented into individual voyages via speed-based port-stop detection, augmented with meteorological features, and organized into fixed-length input sequences.
+%     \item \textbf{Sailing Time Prediction}: One of ten candidate models processes the input sequences to predict the remaining sailing time for the current voyage segment.
+% \end{enumerate}
+
+% \begin{figure*}[t]
+% \centering
+% \begin{tikzpicture}[
+%     node distance=0.5cm and 0.6cm,
+%     box/.style={draw, rounded corners=2pt, minimum height=0.7cm, text centered, font=\footnotesize},
+%     data/.style={box, fill=blue!8, minimum width=2.0cm},
+%     proc/.style={box, fill=orange!12, minimum width=2.4cm},
+%     feat/.style={box, fill=green!10, minimum width=2.4cm},
+%     graph/.style={box, fill=violet!10, minimum width=2.4cm},
+%     fuse/.style={box, fill=yellow!15, minimum width=2.4cm},
+%     outnode/.style={box, fill=red!8, minimum width=1.8cm, font=\footnotesize\bfseries},
+%     kd/.style={box, fill=cyan!10, minimum width=2.4cm, dashed},
+%     arr/.style={-{Stealth[length=5pt]}, thick},
+%     darr/.style={-{Stealth[length=5pt]}, thick, dashed, gray},
+%     lbl/.style={font=\scriptsize, text=black!70},
+% ]
+
+% % === Row 0: Data sources ===
+% \node[data] (ais) {Raw AIS Stream};
+% \node[data, right=2.8cm of ais] (wx) {Weather Data};
+% \node[data, right=2.8cm of wx] (graph_data) {Historical Trajectories};
+
+% % === Row 1: Preprocessing ===
+% \node[proc, below=0.8cm of $(ais)!0.5!(wx)$] (preproc) {\begin{tabular}{c}Voyage Extraction \& Cleaning\\\scriptsize Speed-based segmentation, filtering, normalization\end{tabular}};
+
+% % === Row 2: Sequence output ===
+% \node[feat, below=0.5cm of preproc, minimum width=3.2cm] (seq) {AIS Sequence ($48 \times 11$)};
+
+% % Arrows: data -> preproc
+% \draw[arr] (ais.south) -- ++(0,-0.15) -| (preproc.north -| preproc.west);
+% \draw[arr] (wx.south) -- ++(0,-0.15) -| (preproc.north -| preproc.east);
+
+% \draw[arr] (preproc) -- (seq);
+
+% % === Row 3: Two branches ===
+% % Left: Statistical branch
+% \node[feat, below left=1.2cm and 1.8cm of seq] (stat) {\begin{tabular}{c}Statistical Features\\\scriptsize 7 aggs $\times$ 11 feats = 77-d\end{tabular}};
+% \node[feat, below=0.4cm of stat] (cross) {\begin{tabular}{c}Cross-Features (4-d)\\\scriptsize SOG$\times$dist, dist$^2$, \ldots\end{tabular}};
+
+% % Right: Graph branch
+% \node[graph, below right=1.2cm and 1.8cm of seq] (rgraph) {\begin{tabular}{c}Route Graph $\mathcal{G}(\mathcal{V}, \mathcal{E})$\\\scriptsize $2^\circ{\times}2^\circ$ grid, 1,541 nodes\end{tabular}};
+% \node[graph, below=0.4cm of rgraph] (gcn) {\begin{tabular}{c}2-Layer GCN\\\scriptsize $9 \to 64 \to 32$-d embeddings\end{tabular}};
+% \node[graph, below=0.4cm of gcn] (cell_emb) {\begin{tabular}{c}Cell Embeddings ($32{\times}3$)\\\scriptsize current + origin + route mean\end{tabular}};
+
+% % Arrows for branches
+% \draw[arr] (seq.south) -- ++(0,-0.25) -| (stat.north);
+% \draw[arr] (stat) -- (cross);
+% \draw[arr] (seq.south) -- ++(0,-0.25) -| (rgraph.north);
+% \draw[arr] (graph_data.south) -- ++(0,-1.0) -| ([xshift=0.5cm]rgraph.east) -- (rgraph.east);
+% \draw[arr] (rgraph) -- (gcn);
+% \draw[arr] (gcn) -- (cell_emb);
+
+% % === Row 4: Fusion ===
+% \node[fuse, below=1.2cm of $(cross.south)!0.5!(cell_emb.south)$, minimum width=3.0cm] (concat) {Concatenation (81 + 96 = 177-d)};
+
+% \draw[arr] (cross.south) -- ++(0,-0.2) -| (concat.north -| concat.west);
+% \draw[arr] (cell_emb.south) -- ++(0,-0.2) -| (concat.north -| concat.east);
+
+% % === Row 5: MLP Head ===
+% \node[proc, below=0.5cm of concat] (mlp) {\begin{tabular}{c}MLP Head\\\scriptsize $512 \to 256 \to 128 \to 1$, BN, Dropout\end{tabular}};
+% \draw[arr] (concat) -- (mlp);
+
+% % === Row 6: Output ===
+% \node[outnode, below=0.5cm of mlp] (yhat) {$\hat{y}$ (remaining hours)};
+% \draw[arr] (mlp) -- (yhat);
+
+% % === KD box (right side) ===
+% \node[kd, right=1.5cm of mlp, minimum width=3.0cm] (ens) {\begin{tabular}{c}Teacher Ensemble\\\scriptsize Top-7 of 15 seeds (Ens7)\end{tabular}};
+% \node[kd, below=0.4cm of ens, minimum width=3.0cm] (soft) {\begin{tabular}{c}Soft Targets $\hat{y}^{\text{soft}}$\\\scriptsize $\frac{1}{K}\sum_k f_k(\mathbf{x})$\end{tabular}};
+% \node[kd, below=0.4cm of soft, minimum width=3.0cm] (kdloss) {\begin{tabular}{c}KD Loss\\\scriptsize $(1{-}\alpha)\cdot\text{MSE}(\hat{y},y) + \alpha\cdot\text{MSE}(\hat{y},\hat{y}^{\text{soft}})$\end{tabular}};
+
+% \draw[darr] (ens) -- (soft);
+% \draw[darr] (soft) -- (kdloss);
+% \draw[darr] (kdloss.west) -- (yhat.east);
+
+% % === Background boxes ===
+% \begin{scope}[on background layer]
+%     \node[draw=green!50!black, dashed, rounded corners=4pt, inner sep=8pt,
+%           fit=(stat)(cross)] (stat_box) {};
+%     \node[draw=violet!60!black, dashed, rounded corners=4pt, inner sep=8pt,
+%           fit=(rgraph)(gcn)(cell_emb)] (graph_box) {};
+%     \node[draw=cyan!60!black, dashed, rounded corners=4pt, inner sep=8pt,
+%           fit=(ens)(soft)(kdloss)] (kd_box) {};
+% \end{scope}
+% % Labels above boxes
+% \node[font=\scriptsize, text=green!50!black, above=1pt of stat_box.north, fill=white, inner sep=2pt] {Statistical Branch};
+% \node[font=\scriptsize, text=violet!60!black, above=1pt of graph_box.north, fill=white, inner sep=2pt] {Spatial Branch (GCN)};
+% \node[font=\scriptsize, text=cyan!60!black, above=1pt of kd_box.north, fill=white, inner sep=2pt] {Knowledge Distillation};
+
+% \end{tikzpicture}
+% \caption{Architecture of the proposed MSTGN-KD system. Raw AIS and weather data are preprocessed into 48-step sequences. The statistical branch extracts 81 aggregated features plus 4 cross-features; the spatial branch constructs a route graph and produces GCN cell embeddings. Both are fused and fed through an MLP head. During training, an ensemble teacher provides soft targets via knowledge distillation (dashed lines).}
+% \label{fig:architecture}
+% \end{figure*}
+
+% \subsection{Input Representation}
+
+% Each input sequence consists of $L_{\text{enc}} = 48$ consecutive AIS observations.
+% At each time step $t$, the feature vector $x_t \in \mathbb{R}^{11}$ comprises:
+
+% \begin{itemize}
+%     \item \textbf{Navigation features} ($d_{\text{nav}} = 6$): latitude, longitude, speed over ground (SOG), course over ground (COG), great-circle distance to destination ($\text{dist\_km}$), and bearing difference ($\Delta\theta$) between COG and the bearing toward the destination.
+%     \item \textbf{Meteorological features} ($d_{\text{wx}} = 5$): temperature, wind speed, wind level, mean sea-level pressure (PRMSL), and visibility.
+% \end{itemize}
+
+% The distance to destination and bearing difference are computed using the Haversine formula:
+% \begin{equation}
+%     d = 2R \arcsin\!\left(\sqrt{\sin^2\!\frac{\Delta\phi}{2} + \cos\phi_1 \cos\phi_2 \sin^2\!\frac{\Delta\lambda}{2}}\right)
+%     \label{eq:haversine}
+% \end{equation}
+% where $R = 6{,}371$ km is the Earth's radius, $\phi$ denotes latitude, and $\lambda$ denotes longitude.
+
+% Navigation features undergo min-max normalization to $[0, 1]$ with clipping at $[-0.5, 1.5]$ to handle out-of-distribution test samples.
+% The target variable (remaining hours) is transformed via log-standardization: $\tilde{y} = (\ln(1+y) - \mu) / \sigma$, where $\mu$ and $\sigma$ are computed from the training set.
+
+% \subsection{Voyage Extraction and Port-Stop Detection}
+% \label{sec:voyage_extraction}
+
+% Extracting individual voyages from the continuous AIS stream is a critical preprocessing step.
+% We employ a speed-based segmentation approach with the following criteria:
+
+% \begin{enumerate}
+%     \item \textbf{Stop detection}: A vessel is classified as \textit{stopped} when its SOG falls below $\tau_{\text{stop}} = 0.3$~knots. The binary stop indicator $s_t = \mathbb{1}[\text{SOG}_t < \tau_{\text{stop}}]$ is computed for each AIS record. Consecutive records with the same stop state are grouped into segments via cumulative sum of state changes.
+%     \item \textbf{Stop validation}: A stopped segment is considered a valid \textit{port stop} only if its duration exceeds $T_{\text{min\_stop}} = 2$~hours, filtering out brief anchorages and speed measurement noise.
+%     \item \textbf{Sailing segment filtering}: Sailing segments between successive port stops are retained only if they satisfy: duration $\geq T_{\text{min\_sail}} = 6$~hours and number of AIS records $\geq N_{\text{min}} = 50$. This eliminates short harbor maneuvers and data-sparse segments.
+%     \item \textbf{Trans-Pacific filtering}: To focus on the target route, we retain only voyages connecting Asian ports (longitude $> 100^\circ$E or $< 150^\circ$W) to U.S.\ West Coast ports ($-130^\circ < \text{lon} < -115^\circ$), identified by the geographic coordinates of voyage endpoints.
+%     \item \textbf{Duration filtering}: Voyages exceeding 720 hours (30 days) are excluded as likely erroneous or multi-stop itineraries.
+% \end{enumerate}
+
+% This pipeline yields 9,087 valid voyages from 3,940 unique vessels.
+
+% \subsection{Model Selection Rationale}
+% \label{sec:model_selection}
+
+% Following the architectural taxonomy proposed by recent deep time-series forecasting surveys~\cite{kim2025comprehensive, zeng2023transformers}, we select ten models covering five major families to ensure a comprehensive and systematic comparison:
+
+% \begin{enumerate}
+%     \item \textbf{Recurrent models} capture sequential dependencies through hidden state propagation. We include \textit{LSTM}~\cite{hochreiter1997lstm} and \textit{GRU}~\cite{cho2014gru}, the two most widely adopted variants, to evaluate whether gating mechanisms provide meaningful advantages.
+
+%     \item \textbf{Convolutional models} extract local temporal patterns through learnable filters. We include \textit{1D-CNN} (standard multi-layer convolutional network) and \textit{TCN}~\cite{bai2018tcn} (dilated causal convolutions with exponentially growing receptive fields), representing the two dominant convolutional paradigms.
+
+%     \item \textbf{Attention-based models} use self-attention to capture long-range dependencies. We include a \textit{Vanilla Transformer}~\cite{vaswani2017attention} (encoder-only with average pooling), a \textit{Conv-Transformer} hybrid (CNN feature extraction followed by Transformer encoding), and the \textit{Informer}~\cite{zhou2021informer} (ProbSparse attention with distilling). This family receives the most representatives given its recent prominence in the literature.
+
+%     \item \textbf{Tree-based models} operate on tabular feature representations. We include \textit{XGBoost}~\cite{chen2016xgboost}, the dominant gradient-boosted tree method, which requires hand-crafted statistical features extracted from the 48-step input window (last-step values, means, standard deviations, and deltas).
+
+%     \item \textbf{Feedforward models} serve as non-sequential baselines. We include a \textit{multi-layer perceptron (MLP)} operating on flattened input vectors, and \textit{Ridge Regression} ($L_2$-regularized linear regression on summary statistics) as the simplest baseline.
+
+%     \item \textbf{Graph-enhanced models} incorporate spatial structure through graph neural networks. We propose the \textit{Maritime Spatio-Temporal Graph Network (MSTGN)}, which constructs a route graph over discretized ocean grid cells and uses GCN-derived spatial embeddings to augment prediction. We evaluate multiple MSTGN variants to disentangle the contributions of graph features, temporal modeling, and statistical features.
+% \end{enumerate}
+
+% \subsection{Model Configurations}
+
+% Table~\ref{tab:model_configs} summarizes the configuration and parameter counts for all models.
+% All neural models use the same input representation (48$\times$11 feature sequences) except XGBoost and Ridge, which operate on hand-crafted tabular features.
+
+% \begin{table}[t]
+%     \centering
+%     \caption{Model Configurations and Parameter Counts}
+%     \label{tab:model_configs}
+%     \begin{tabular}{llr}
+%         \toprule
+%         \textbf{Model} & \textbf{Key Configuration} & \textbf{Params} \\
+%         \midrule
+%         Ridge & $L_2$ regularization & -- \\
+%         MLP & $512{\to}256{\to}128$, BN, dropout & 270K \\
+%         XGBoost & 500 rounds, GPU hist & -- \\
+%         \midrule
+%         LSTM & 2 layers, $h{=}256$ & 802K \\
+%         GRU & 2 layers, $h{=}256$ & 610K \\
+%         \midrule
+%         1D-CNN & 3 Conv1d, MaxPool, AvgPool & 350K \\
+%         TCN & 4 dilated blocks $[128,128,256,256]$ & 600K \\
+%         \midrule
+%         Transformer & 3 enc layers, $d{=}256$, 8 heads & 1.6M \\
+%         Conv-Trans. & 2 Conv1d $+$ 2 enc layers, $d{=}256$ & 1.5M \\
+%         Informer & 2 enc $+$ 1 dec, $d{=}512$, ProbSparse & 11.3M \\
+%         \midrule
+%         MSTGN-MLP & Stats(44) + 2-layer GCN, $d_\text{cell}{=}32$ & 238K \\
+%         MSTGN-MLP2 & Stats(81) + 2-layer GCN + cross-feats & 273K \\
+%         MSTGN-Late & GRU + GCN late fusion & 737K \\
+%         StatMLP & Stats 44-dim, $256{\to}128{\to}64$ & 189K \\
+%         \bottomrule
+%     \end{tabular}
+% \end{table}
+
+% \subsubsection{Informer Architecture Details}
+
+% Among the evaluated models, the Informer~\cite{zhou2021informer} has the most complex architecture.
+% Its key innovations include:
+% (1) ProbSparse self-attention, which identifies the most informative queries through a KL-divergence-based sparsity measure, reducing attention complexity to $O(L \log L)$;
+% (2) self-attention distilling, which progressively halves the sequence length through Conv1d + MaxPool operations between encoder layers;
+% and (3) a generative-style decoder that produces predictions in a single forward pass.
+
+% The input embedding combines three components:
+% \begin{equation}
+%     \mathbf{X}_{\text{feed}}^{(t)} = \alpha \, \mathbf{u}_t + \text{PE}_{t} + \sum_{p} \text{SE}_{t}^{(p)}
+%     \label{eq:embedding}
+% \end{equation}
+% where $\mathbf{u}_t$ is the scalar projection of raw features through a 1D convolution ($d \to d_{\text{model}}$); $\text{PE}_{t}$ is fixed sinusoidal positional encoding; and $\text{SE}_{t}^{(p)}$ are learnable temporal embeddings for each granularity $p \in \{\text{minute, hour, weekday, day, month}\}$.
+
+\subsection{Data Preparation and System Overview}
+\label{sec:voyage_extraction}
+The overall pipeline is illustrated in Fig.~\ref{fig:architecture}. Raw AIS records are first cleaned, segmented into voyages, matched with meteorological observations, and organized into fixed-length input sequences. The processed sequences are then fed into one of the candidate forecasting models to predict the remaining sailing time.
 
 \begin{enumerate}
     \item \textbf{Data Preprocessing}: Raw AIS records are cleaned, segmented into individual voyages via speed-based port-stop detection, augmented with meteorological features, and organized into fixed-length input sequences.
@@ -226,65 +435,35 @@ The prediction system consists of two stages, as illustrated in Fig.~\ref{fig:ar
 \label{fig:architecture}
 \end{figure*}
 
-\subsection{Input Representation}
-
-Each input sequence consists of $L_{\text{enc}} = 48$ consecutive AIS observations.
-At each time step $t$, the feature vector $x_t \in \mathbb{R}^{11}$ comprises:
-
+Each input sequence consists of $L_{\text{enc}} = 48$ consecutive AIS observations. At each time step $t$, the feature vector $x_t \in \mathbb{R}^{11}$ includes:
 \begin{itemize}
     \item \textbf{Navigation features} ($d_{\text{nav}} = 6$): latitude, longitude, speed over ground (SOG), course over ground (COG), great-circle distance to destination ($\text{dist\_km}$), and bearing difference ($\Delta\theta$) between COG and the bearing toward the destination.
     \item \textbf{Meteorological features} ($d_{\text{wx}} = 5$): temperature, wind speed, wind level, mean sea-level pressure (PRMSL), and visibility.
 \end{itemize}
+Navigation features are min-max normalized to $[0,1]$ with clipping at $[-0.5,1.5]$, and the target variable is log-standardized as $\tilde{y} = (\ln(1+y)-\mu)/\sigma$, where $\mu$ and $\sigma$ are computed from the training set.
 
-The distance to destination and bearing difference are computed using the Haversine formula:
-\begin{equation}
-    d = 2R \arcsin\!\left(\sqrt{\sin^2\!\frac{\Delta\phi}{2} + \cos\phi_1 \cos\phi_2 \sin^2\!\frac{\Delta\lambda}{2}}\right)
-    \label{eq:haversine}
-\end{equation}
-where $R = 6{,}371$ km is the Earth's radius, $\phi$ denotes latitude, and $\lambda$ denotes longitude.
-
-Navigation features undergo min-max normalization to $[0, 1]$ with clipping at $[-0.5, 1.5]$ to handle out-of-distribution test samples.
-The target variable (remaining hours) is transformed via log-standardization: $\tilde{y} = (\ln(1+y) - \mu) / \sigma$, where $\mu$ and $\sigma$ are computed from the training set.
-
-\subsection{Voyage Extraction and Port-Stop Detection}
-\label{sec:voyage_extraction}
-
-Extracting individual voyages from the continuous AIS stream is a critical preprocessing step.
-We employ a speed-based segmentation approach with the following criteria:
-
+Voyages are extracted from the continuous AIS stream using speed-based port-stop detection:
 \begin{enumerate}
-    \item \textbf{Stop detection}: A vessel is classified as \textit{stopped} when its SOG falls below $\tau_{\text{stop}} = 0.3$~knots. The binary stop indicator $s_t = \mathbb{1}[\text{SOG}_t < \tau_{\text{stop}}]$ is computed for each AIS record. Consecutive records with the same stop state are grouped into segments via cumulative sum of state changes.
-    \item \textbf{Stop validation}: A stopped segment is considered a valid \textit{port stop} only if its duration exceeds $T_{\text{min\_stop}} = 2$~hours, filtering out brief anchorages and speed measurement noise.
-    \item \textbf{Sailing segment filtering}: Sailing segments between successive port stops are retained only if they satisfy: duration $\geq T_{\text{min\_sail}} = 6$~hours and number of AIS records $\geq N_{\text{min}} = 50$. This eliminates short harbor maneuvers and data-sparse segments.
-    \item \textbf{Trans-Pacific filtering}: To focus on the target route, we retain only voyages connecting Asian ports (longitude $> 100^\circ$E or $< 150^\circ$W) to U.S.\ West Coast ports ($-130^\circ < \text{lon} < -115^\circ$), identified by the geographic coordinates of voyage endpoints.
-    \item \textbf{Duration filtering}: Voyages exceeding 720 hours (30 days) are excluded as likely erroneous or multi-stop itineraries.
+    \item \textbf{Stop detection}: a vessel is classified as stopped when its SOG falls below $\tau_{\text{stop}} = 0.3$~knots.
+    \item \textbf{Stop validation}: a stopped segment is treated as a valid port stop only if its duration exceeds $T_{\text{min\_stop}} = 2$~hours.
+    \item \textbf{Sailing segment filtering}: sailing segments between successive port stops are retained only if duration $\geq T_{\text{min\_sail}} = 6$~hours and the number of AIS records $\geq N_{\text{min}} = 50$.
+    \item \textbf{Route filtering}: we retain only voyages connecting Asian ports (longitude $> 100^\circ$E or $< 150^\circ$W) to U.S.\ West Coast ports ($-130^\circ < \text{lon} < -115^\circ$).
+    \item \textbf{Duration filtering}: voyages exceeding 720 hours are excluded as likely erroneous or multi-stop itineraries.
 \end{enumerate}
+This procedure yields 9,087 valid voyages from 3,940 unique vessels.
 
-This pipeline yields 9,087 valid voyages from 3,940 unique vessels.
-
-\subsection{Model Selection Rationale}
+\subsection{Benchmarked Models}
 \label{sec:model_selection}
-
-Following the architectural taxonomy proposed by recent deep time-series forecasting surveys~\cite{kim2025comprehensive, zeng2023transformers}, we select ten models covering five major families to ensure a comprehensive and systematic comparison:
-
+Following recent deep time-series forecasting surveys~\cite{kim2025comprehensive, zeng2023transformers}, we evaluate ten models spanning five major families:
 \begin{enumerate}
-    \item \textbf{Recurrent models} capture sequential dependencies through hidden state propagation. We include \textit{LSTM}~\cite{hochreiter1997lstm} and \textit{GRU}~\cite{cho2014gru}, the two most widely adopted variants, to evaluate whether gating mechanisms provide meaningful advantages.
-
-    \item \textbf{Convolutional models} extract local temporal patterns through learnable filters. We include \textit{1D-CNN} (standard multi-layer convolutional network) and \textit{TCN}~\cite{bai2018tcn} (dilated causal convolutions with exponentially growing receptive fields), representing the two dominant convolutional paradigms.
-
-    \item \textbf{Attention-based models} use self-attention to capture long-range dependencies. We include a \textit{Vanilla Transformer}~\cite{vaswani2017attention} (encoder-only with average pooling), a \textit{Conv-Transformer} hybrid (CNN feature extraction followed by Transformer encoding), and the \textit{Informer}~\cite{zhou2021informer} (ProbSparse attention with distilling). This family receives the most representatives given its recent prominence in the literature.
-
-    \item \textbf{Tree-based models} operate on tabular feature representations. We include \textit{XGBoost}~\cite{chen2016xgboost}, the dominant gradient-boosted tree method, which requires hand-crafted statistical features extracted from the 48-step input window (last-step values, means, standard deviations, and deltas).
-
-    \item \textbf{Feedforward models} serve as non-sequential baselines. We include a \textit{multi-layer perceptron (MLP)} operating on flattened input vectors, and \textit{Ridge Regression} ($L_2$-regularized linear regression on summary statistics) as the simplest baseline.
-
-    \item \textbf{Graph-enhanced models} incorporate spatial structure through graph neural networks. We propose the \textit{Maritime Spatio-Temporal Graph Network (MSTGN)}, which constructs a route graph over discretized ocean grid cells and uses GCN-derived spatial embeddings to augment prediction. We evaluate multiple MSTGN variants to disentangle the contributions of graph features, temporal modeling, and statistical features.
+    \item \textbf{Recurrent models}: \textit{LSTM}~\cite{hochreiter1997lstm} and \textit{GRU}~\cite{cho2014gru}.
+    \item \textbf{Convolutional models}: \textit{1D-CNN} and \textit{TCN}~\cite{bai2018tcn}.
+    \item \textbf{Attention-based models}: \textit{Transformer}~\cite{vaswani2017attention}, \textit{Conv-Transformer}, and \textit{Informer}~\cite{zhou2021informer}.
+    \item \textbf{Tree-based model}: \textit{XGBoost}~\cite{chen2016xgboost}.
+    \item \textbf{Feedforward baselines}: \textit{MLP} and \textit{Ridge Regression}.
 \end{enumerate}
 
-\subsection{Model Configurations}
-
-Table~\ref{tab:model_configs} summarizes the configuration and parameter counts for all models.
-All neural models use the same input representation (48$\times$11 feature sequences) except XGBoost and Ridge, which operate on hand-crafted tabular features.
+All neural models use the same $48 \times 11$ sequence input, whereas XGBoost and Ridge operate on hand-crafted tabular features. Table~\ref{tab:model_configs} summarizes the main configurations and parameter counts.
 
 \begin{table}[t]
     \centering
@@ -316,193 +495,165 @@ All neural models use the same input representation (48$\times$11 feature sequen
     \end{tabular}
 \end{table}
 
-\subsubsection{Informer Architecture Details}
+Among the evaluated attention models, Informer follows the original ProbSparse-attention and distilling design~\cite{zhou2021informer}. Since it serves as a baseline rather than the main proposed method, we omit further architectural detail here.
 
-Among the evaluated models, the Informer~\cite{zhou2021informer} has the most complex architecture.
-Its key innovations include:
-(1) ProbSparse self-attention, which identifies the most informative queries through a KL-divergence-based sparsity measure, reducing attention complexity to $O(L \log L)$;
-(2) self-attention distilling, which progressively halves the sequence length through Conv1d + MaxPool operations between encoder layers;
-and (3) a generative-style decoder that produces predictions in a single forward pass.
+% \subsection{Maritime Route Graph Construction}
+% \label{sec:route_graph}
 
-The input embedding combines three components:
-\begin{equation}
-    \mathbf{X}_{\text{feed}}^{(t)} = \alpha \, \mathbf{u}_t + \text{PE}_{t} + \sum_{p} \text{SE}_{t}^{(p)}
-    \label{eq:embedding}
-\end{equation}
-where $\mathbf{u}_t$ is the scalar projection of raw features through a 1D convolution ($d \to d_{\text{model}}$); $\text{PE}_{t}$ is fixed sinusoidal positional encoding; and $\text{SE}_{t}^{(p)}$ are learnable temporal embeddings for each granularity $p \in \{\text{minute, hour, weekday, day, month}\}$.
+% To incorporate spatial structure into ETA prediction, we construct a maritime route graph $\mathcal{G} = (\mathcal{V}, \mathcal{E})$ from historical AIS trajectories.
+% The ocean surface is discretized into $2^\circ \times 2^\circ$ grid cells.
+% A cell is retained as a node if it contains at least 50 AIS observations, yielding $|\mathcal{V}| = 1{,}541$ active nodes (plus one \textit{unknown} node for rare out-of-distribution cells).
+% Edges are constructed from two sources:
+% \begin{itemize}
+%     \item \textbf{Transition edges}: If consecutive AIS records from any voyage occupy cells $v_i$ and $v_j$, a directed edge $(v_i, v_j)$ is added, weighted by the log-transformed transition count.
+%     \item \textbf{Geographic edges}: Undirected edges connect cells sharing a border (8-connectivity), providing structural continuity even where transition data is sparse.
+% \end{itemize}
+% The resulting graph has 4{,}772 transition edges and 2{,}110 geographic edges (13{,}033 non-zero entries in the symmetrized adjacency matrix).
+% Each node $v \in \mathcal{V}$ is assigned a 9-dimensional feature vector: mean SOG, SOG standard deviation, mean temperature, mean wind speed, mean pressure, mean visibility, log vessel count, and normalized center coordinates (latitude, longitude).
 
-\subsection{Maritime Route Graph Construction}
-\label{sec:route_graph}
+% \subsection{MSTGN Architecture}
+% \label{sec:mstgn}
 
-To incorporate spatial structure into ETA prediction, we construct a maritime route graph $\mathcal{G} = (\mathcal{V}, \mathcal{E})$ from historical AIS trajectories.
-The ocean surface is discretized into $2^\circ \times 2^\circ$ grid cells.
-A cell is retained as a node if it contains at least 50 AIS observations, yielding $|\mathcal{V}| = 1{,}541$ active nodes (plus one \textit{unknown} node for rare out-of-distribution cells).
-Edges are constructed from two sources:
-\begin{itemize}
-    \item \textbf{Transition edges}: If consecutive AIS records from any voyage occupy cells $v_i$ and $v_j$, a directed edge $(v_i, v_j)$ is added, weighted by the log-transformed transition count.
-    \item \textbf{Geographic edges}: Undirected edges connect cells sharing a border (8-connectivity), providing structural continuity even where transition data is sparse.
-\end{itemize}
-The resulting graph has 4{,}772 transition edges and 2{,}110 geographic edges (13{,}033 non-zero entries in the symmetrized adjacency matrix).
-Each node $v \in \mathcal{V}$ is assigned a 9-dimensional feature vector: mean SOG, SOG standard deviation, mean temperature, mean wind speed, mean pressure, mean visibility, log vessel count, and normalized center coordinates (latitude, longitude).
+% The MSTGN processes the route graph and input trajectory through two parallel branches that are fused for the final prediction.
 
-\subsection{MSTGN Architecture}
+% \paragraph{Design philosophy.}
+% We emphasize that MSTGN is best understood as a \textit{graph-augmented statistical feature fusion model} rather than an end-to-end deep spatio-temporal network in the vein of ST-GCN or ASTGCN~\cite{daiHybridSpatiotemporalGraph2020}.
+% The GCN component does not model sequential propagation of vessel state across the graph; instead, it produces a static lookup table of spatial context embeddings that are appended to statistical features at prediction time.
+% This design choice reflects an empirical finding discussed in Section~\ref{sec:graph_ablation}: for single-step ETA regression with a compact input window, compact spatial context features outperform complex end-to-end spatial-temporal architectures.
+% The contribution of MSTGN is thus correctly attributed to three separable sources: (1)~\textit{statistical feature engineering} as the dominant factor, (2)~\textit{graph-derived spatial context} as a consistent but marginal supplementary signal, and (3)~\textit{ensemble knowledge distillation} as a principled compression strategy.
+% We design ablation experiments in Section~\ref{sec:ablations} to quantify each of these contributions, including a direct comparison of XGBoost with GCN embeddings to isolate the contribution of the neural fusion head.
+
+% \paragraph{Spatial branch (GCN).}
+% A two-layer Graph Convolutional Network~\cite{kipf2017gcn} produces cell embeddings from the route graph:
+% \begin{equation}
+%     \mathbf{H}^{(l+1)} = \sigma\!\left(\hat{\mathbf{A}} \, \mathbf{H}^{(l)} \mathbf{W}^{(l)} + \mathbf{b}^{(l)}\right)
+% \end{equation}
+% where $\hat{\mathbf{A}} = \tilde{\mathbf{D}}^{-1/2} \tilde{\mathbf{A}} \, \tilde{\mathbf{D}}^{-1/2}$ is the symmetrically normalized adjacency matrix, and $\sigma$ is ReLU.
+% The GCN maps the 9-dimensional node features through hidden dimension 64 to a 32-dimensional embedding space.
+% For each input sequence, the last-step grid cell is looked up to retrieve its embedding $\mathbf{z}_\text{cell} \in \mathbb{R}^{32}$.
+
+% \paragraph{Temporal/statistical branch.}
+% We evaluate two strategies for extracting features from the 48-step input sequence:
+% \begin{itemize}
+%     \item \textbf{GRU encoder}: A 2-layer GRU ($h{=}256$) with attention pooling over hidden states, producing a fixed-length representation.
+%     \item \textbf{Statistical features}: Following the XGBoost feature set, we extract last-step values, channel means, standard deviations, and first-last differences from the 48-step window, yielding a compact 44-dimensional vector processed by a 3-layer MLP ($256{\to}128{\to}64$).
+% \end{itemize}
+
+% \paragraph{Fusion and prediction.}
+% The spatial embedding $\mathbf{z}_\text{cell}$ is concatenated with the temporal/statistical representation and passed through a 2-layer prediction head ($128{\to}64{\to}1$) to produce the final ETA estimate.
+
+% We evaluate five MSTGN variants to isolate each component's contribution:
+% \begin{itemize}
+%     \item \textbf{MSTGN-MLP}: Statistical features (44-dim) + GCN cell embeddings (no sequence modeling).
+%     \item \textbf{MSTGN-MLP2}: Enriched statistical features (81-dim) + 3 graph contexts + cross-features.
+%     \item \textbf{MSTGN-LateFusion}: GRU on raw features, GCN embedding fused only at the output layer.
+%     \item \textbf{StatMLP}: Statistical features only, no graph (ablation baseline).
+%     \item \textbf{MSTGN-GRU}: GRU with cell embeddings concatenated to every input timestep.
+% \end{itemize}
+
+% \paragraph{Enriched feature representation (MSTGN-MLP2).}
+% To close the performance gap with XGBoost, we extend the MSTGN-MLP feature set from 44 dimensions to 81 dimensions:
+% \begin{itemize}
+%     \item \textbf{7 aggregations} (vs.\ 4 originally): last-step, mean, standard deviation, first-last difference, minimum, maximum, and recent-12-step mean, computed across all 11 features ($7 \times 11 = 77$ features).
+%     \item \textbf{4 cross-features}: $\text{SOG} \times \text{dist}$, $\text{dist}^2$, $\text{SOG} \times \Delta\theta$, and $\Delta\text{SOG} \times \text{dist}$, capturing nonlinear feature interactions.
+%     \item \textbf{3 graph contexts}: current-cell embedding, origin-cell embedding, and mean route embedding (averaging embeddings along the trajectory).
+% \end{itemize}
+% The MLP head is expanded to $512 \to 256 \to 128 \to 1$ (273K parameters) with BatchNorm and 10\% dropout.
+
+% \paragraph{Ensemble strategy.}
+% To leverage the stochastic nature of neural network training, we train multiple MSTGN-MLP2 models with identical hyperparameters but different random seeds.
+% Each model converges to a different local minimum, producing diverse predictions.
+% At inference time, we average the predictions of the top-$K$ models (selected by validation loss) to form the ensemble prediction:
+% \begin{equation}
+%     \hat{y}_{\text{ens}} = \frac{1}{K} \sum_{k=1}^{K} \hat{y}^{(k)}
+% \end{equation}
+% We train 15 models (seeds 42--56) and report results for $K \in \{5, 7, 15\}$; the top-7 ensemble (MSTGN-Ens7) achieves the best MAE.
+
+% \paragraph{Knowledge distillation.}
+% While the ensemble achieves the best raw accuracy, deploying 7 models at inference time is impractical.
+% We therefore apply \textit{ensemble knowledge distillation}~\cite{hinton2015distilling} to compress the ensemble's knowledge into a single model.
+% The teacher ensemble generates soft targets $\hat{y}^{\text{soft}}_i = \frac{1}{K}\sum_{k=1}^{K} f_k(\mathbf{x}_i)$ for every training sample.
+% The student MSTGN-MLP2 is then trained with a combined loss:
+% \begin{equation}
+%     \mathcal{L} = (1-\alpha) \cdot \mathcal{L}_{\text{MSE}}(\hat{y}, y) + \alpha \cdot \mathcal{L}_{\text{MSE}}(\hat{y}, \hat{y}^{\text{soft}})
+%     \label{eq:kd_loss}
+% \end{equation}
+% where $\alpha \in [0, 1]$ balances between fitting ground-truth labels and mimicking the ensemble's predictions.
+% The soft targets encode richer information than hard labels: they capture the ensemble's confidence and implicit uncertainty, acting as a form of label smoothing that regularizes the student model.
+% We find that $\alpha = 0.6$ yields the best results (see Section~\ref{sec:kd_ablation}).
+\subsection{Maritime Route Graph and MSTGN}
 \label{sec:mstgn}
 
-The MSTGN processes the route graph and input trajectory through two parallel branches that are fused for the final prediction.
+To explicitly encode spatial dependencies in vessel movements, we derive a maritime route graph $\mathcal{G} = (\mathcal{V}, \mathcal{E})$ from historical AIS trajectories and use it as the underlying spatial structure of MSTGN.
 
-\paragraph{Design philosophy.}
-We emphasize that MSTGN is best understood as a \textit{graph-augmented statistical feature fusion model} rather than an end-to-end deep spatio-temporal network in the vein of ST-GCN or ASTGCN~\cite{daiHybridSpatiotemporalGraph2020}.
-The GCN component does not model sequential propagation of vessel state across the graph; instead, it produces a static lookup table of spatial context embeddings that are appended to statistical features at prediction time.
-This design choice reflects an empirical finding discussed in Section~\ref{sec:graph_ablation}: for single-step ETA regression with a compact input window, compact spatial context features outperform complex end-to-end spatial-temporal architectures.
-The contribution of MSTGN is thus correctly attributed to three separable sources: (1)~\textit{statistical feature engineering} as the dominant factor, (2)~\textit{graph-derived spatial context} as a consistent but marginal supplementary signal, and (3)~\textit{ensemble knowledge distillation} as a principled compression strategy.
-We design ablation experiments in Section~\ref{sec:ablations} to quantify each of these contributions, including a direct comparison of XGBoost with GCN embeddings to isolate the contribution of the neural fusion head.
-
-\paragraph{Spatial branch (GCN).}
-A two-layer Graph Convolutional Network~\cite{kipf2017gcn} produces cell embeddings from the route graph:
+\paragraph{Route graph construction.}
+The ocean surface is discretized into $2^\circ \times 2^\circ$ grid cells, and a cell is retained as a node if it contains at least 50 AIS observations, yielding $|\mathcal{V}| = 1{,}541$ active nodes plus one \textit{unknown} node for rare out-of-distribution cells. Edges are defined from two sources:
+\begin{itemize}
+    \item \textbf{Transition edges}: directed edges between consecutively visited cells, weighted by log-transformed transition counts.
+    \item \textbf{Geographic edges}: undirected edges between border-sharing cells.
+\end{itemize}
+The resulting graph contains 4{,}772 transition edges and 2{,}110 geographic edges (13{,}033 non-zero entries in the symmetrized adjacency matrix). Each node is assigned a 9-dimensional feature vector comprising mean SOG, SOG standard deviation, mean temperature, mean wind speed, mean pressure, mean visibility, log vessel count, and normalized center coordinates.
+\paragraph{MSTGN architecture.}
+MSTGN is designed as a graph-augmented feature-fusion model rather than an end-to-end spatio-temporal graph network. In the spatial branch, a two-layer GCN~\cite{kipf2017gcn} produces 32-dimensional cell embeddings:
 \begin{equation}
-    \mathbf{H}^{(l+1)} = \sigma\!\left(\hat{\mathbf{A}} \, \mathbf{H}^{(l)} \mathbf{W}^{(l)} + \mathbf{b}^{(l)}\right)
+    \mathbf{H}^{(l+1)} = \sigma\!\left(\hat{\mathbf{A}} \, \mathbf{H}^{(l)} \mathbf{W}^{(l)} + \mathbf{b}^{(l)}\right),
 \end{equation}
-where $\hat{\mathbf{A}} = \tilde{\mathbf{D}}^{-1/2} \tilde{\mathbf{A}} \, \tilde{\mathbf{D}}^{-1/2}$ is the symmetrically normalized adjacency matrix, and $\sigma$ is ReLU.
-The GCN maps the 9-dimensional node features through hidden dimension 64 to a 32-dimensional embedding space.
-For each input sequence, the last-step grid cell is looked up to retrieve its embedding $\mathbf{z}_\text{cell} \in \mathbb{R}^{32}$.
+where $\hat{\mathbf{A}} = \tilde{\mathbf{D}}^{-1/2}\tilde{\mathbf{A}}\tilde{\mathbf{D}}^{-1/2}$ and $\sigma$ is ReLU. For each input sequence, the embedding of the last-step grid cell is retrieved as spatial context for prediction.
 
-\paragraph{Temporal/statistical branch.}
-We evaluate two strategies for extracting features from the 48-step input sequence:
+In parallel, the non-graph branch uses one of two alternatives:
 \begin{itemize}
-    \item \textbf{GRU encoder}: A 2-layer GRU ($h{=}256$) with attention pooling over hidden states, producing a fixed-length representation.
-    \item \textbf{Statistical features}: Following the XGBoost feature set, we extract last-step values, channel means, standard deviations, and first-last differences from the 48-step window, yielding a compact 44-dimensional vector processed by a 3-layer MLP ($256{\to}128{\to}64$).
+    \item \textbf{GRU encoder}: a 2-layer GRU with attention pooling over hidden states.
+    \item \textbf{Statistical features}: hand-crafted summaries extracted from the 48-step input window.
+\end{itemize}
+The spatial embedding is concatenated with the temporal or statistical representation and fed to an MLP prediction head.
+
+\paragraph{Model variants.}
+We evaluate five MSTGN variants:
+\begin{itemize}
+    \item \textbf{MSTGN-MLP}: 44-dimensional statistical features + GCN cell embeddings.
+    \item \textbf{MSTGN-MLP2}: enriched statistical features + cross-features + multiple graph contexts.
+    \item \textbf{MSTGN-LateFusion}: GRU encoder with GCN embedding fused at the output layer.
+    \item \textbf{StatMLP}: statistical features only.
+    \item \textbf{MSTGN-GRU}: GRU with cell embeddings concatenated to every timestep.
 \end{itemize}
 
-\paragraph{Fusion and prediction.}
-The spatial embedding $\mathbf{z}_\text{cell}$ is concatenated with the temporal/statistical representation and passed through a 2-layer prediction head ($128{\to}64{\to}1$) to produce the final ETA estimate.
-
-We evaluate five MSTGN variants to isolate each component's contribution:
+For MSTGN-MLP2, the statistical branch is expanded from 44 to 81 dimensions by adding richer aggregations and interaction terms:
 \begin{itemize}
-    \item \textbf{MSTGN-MLP}: Statistical features (44-dim) + GCN cell embeddings (no sequence modeling).
-    \item \textbf{MSTGN-MLP2}: Enriched statistical features (81-dim) + 3 graph contexts + cross-features.
-    \item \textbf{MSTGN-LateFusion}: GRU on raw features, GCN embedding fused only at the output layer.
-    \item \textbf{StatMLP}: Statistical features only, no graph (ablation baseline).
-    \item \textbf{MSTGN-GRU}: GRU with cell embeddings concatenated to every input timestep.
+    \item \textbf{7 aggregations}: last-step, mean, standard deviation, first-last difference, minimum, maximum, and recent-12-step mean across all 11 features.
+    \item \textbf{4 cross-features}: $\text{SOG} \times \text{dist}$, $\text{dist}^2$, $\text{SOG} \times \Delta\theta$, and $\Delta\text{SOG} \times \text{dist}$.
+    \item \textbf{3 graph contexts}: current-cell, origin-cell, and mean-route embeddings.
 \end{itemize}
+The fused representation is processed by a $512 \to 256 \to 128 \to 1$ MLP head with BatchNorm and 10\% dropout.
 
-\paragraph{Enriched feature representation (MSTGN-MLP2).}
-To close the performance gap with XGBoost, we extend the MSTGN-MLP feature set from 44 dimensions to 81 dimensions:
-\begin{itemize}
-    \item \textbf{7 aggregations} (vs.\ 4 originally): last-step, mean, standard deviation, first-last difference, minimum, maximum, and recent-12-step mean, computed across all 11 features ($7 \times 11 = 77$ features).
-    \item \textbf{4 cross-features}: $\text{SOG} \times \text{dist}$, $\text{dist}^2$, $\text{SOG} \times \Delta\theta$, and $\Delta\text{SOG} \times \text{dist}$, capturing nonlinear feature interactions.
-    \item \textbf{3 graph contexts}: current-cell embedding, origin-cell embedding, and mean route embedding (averaging embeddings along the trajectory).
-\end{itemize}
-The MLP head is expanded to $512 \to 256 \to 128 \to 1$ (273K parameters) with BatchNorm and 10\% dropout.
-
-\paragraph{Ensemble strategy.}
-To leverage the stochastic nature of neural network training, we train multiple MSTGN-MLP2 models with identical hyperparameters but different random seeds.
-Each model converges to a different local minimum, producing diverse predictions.
-At inference time, we average the predictions of the top-$K$ models (selected by validation loss) to form the ensemble prediction:
+\paragraph{Ensemble and knowledge distillation.}
+To exploit training stochasticity, we train 15 MSTGN-MLP2 models with different random seeds and form an ensemble by averaging the top-$K$ models selected by validation loss:
 \begin{equation}
-    \hat{y}_{\text{ens}} = \frac{1}{K} \sum_{k=1}^{K} \hat{y}^{(k)}
+    \hat{y}_{\text{ens}} = \frac{1}{K} \sum_{k=1}^{K} \hat{y}^{(k)}.
 \end{equation}
-We train 15 models (seeds 42--56) and report results for $K \in \{5, 7, 15\}$; the top-7 ensemble (MSTGN-Ens7) achieves the best MAE.
-
-\paragraph{Knowledge distillation.}
-While the ensemble achieves the best raw accuracy, deploying 7 models at inference time is impractical.
-We therefore apply \textit{ensemble knowledge distillation}~\cite{hinton2015distilling} to compress the ensemble's knowledge into a single model.
-The teacher ensemble generates soft targets $\hat{y}^{\text{soft}}_i = \frac{1}{K}\sum_{k=1}^{K} f_k(\mathbf{x}_i)$ for every training sample.
-The student MSTGN-MLP2 is then trained with a combined loss:
+We report results for $K \in \{5,7,15\}$, and the top-7 ensemble achieves the best MAE. To avoid multi-model inference at deployment, we further apply ensemble knowledge distillation~\cite{hinton2015distilling} and train the student model with
 \begin{equation}
-    \mathcal{L} = (1-\alpha) \cdot \mathcal{L}_{\text{MSE}}(\hat{y}, y) + \alpha \cdot \mathcal{L}_{\text{MSE}}(\hat{y}, \hat{y}^{\text{soft}})
+    \mathcal{L} = (1-\alpha)\cdot\mathcal{L}_{\text{MSE}}(\hat{y}, y) + \alpha\cdot\mathcal{L}_{\text{MSE}}(\hat{y}, \hat{y}^{\text{soft}}),
     \label{eq:kd_loss}
 \end{equation}
-where $\alpha \in [0, 1]$ balances between fitting ground-truth labels and mimicking the ensemble's predictions.
-The soft targets encode richer information than hard labels: they capture the ensemble's confidence and implicit uncertainty, acting as a form of label smoothing that regularizes the student model.
-We find that $\alpha = 0.6$ yields the best results (see Section~\ref{sec:kd_ablation}).
+where $\hat{y}^{\text{soft}}$ denotes the teacher ensemble prediction. We find that $\alpha = 0.6$ yields the best result (Table~\ref{tab:kd_ablation}).
 
 
 %==============================================================
 \section{Experiments}
 %==============================================================
 
-\subsection{Dataset}
+\subsection{Experimental Setup}
 
-We use a proprietary AIS dataset covering trans-Pacific shipping routes between Chinese ports and the U.S.\ West Coast, spanning from January 2021 to March 2025.
-The raw dataset contains approximately 35.9 million AIS position reports from 3,940 unique vessels.
+We evaluate all methods on a proprietary AIS dataset covering trans-Pacific shipping routes between Chinese ports and the U.S.\ West Coast from January 2021 to March 2025. The raw data contain 35.9 million AIS records from 3,940 vessels. Each record includes MMSI, timestamp, longitude, latitude, speed over ground (SOG), and course over ground (COG); we additionally match temperature, wind speed, wind level (Beaufort scale), mean sea-level pressure, and horizontal visibility from contemporary weather data sources. Voyages are extracted using the procedure in Section~\ref{sec:voyage_extraction}, yielding 9,087 valid voyages and 13.1M/2.9M/2.9M train/validation/test sequences under a 70/15/15 split. All models use the same 48-step input with 11 features per time step.
 
-Each AIS record includes the Maritime Mobile Service Identity (MMSI), timestamp, longitude, latitude, speed over ground (SOG, in knots), and course over ground (COG, in degrees).
-Meteorological observations---temperature, wind speed, wind level (Beaufort scale), mean sea-level pressure, and horizontal visibility---are matched to each AIS record from contemporary weather data sources.
+All models are evaluated under identical conditions: the same voyage-level split, the same 11-dimensional feature set, the same min-max normalization with log-standardized targets, Huber loss ($\delta = 1.0$), and batch size 4,096. Neural models are trained with Adam at $\mathrm{lr}=10^{-3}$ and patience-3 early stopping; Informer follows its original training recipe with $\mathrm{lr}=4\times 10^{-4}$ and ReduceLROnPlateau. Experiments are run on a single NVIDIA RTX PRO 6000 GPU (96\,GB VRAM), and XGBoost uses GPU histogram training. Data loading uses NumPy memmap, 64 workers, and pinned memory to handle the 13M+ training sequences.
 
-Individual voyages are extracted using the speed-based segmentation procedure described in Section~\ref{sec:voyage_extraction}.
-After filtering, the dataset is partitioned by voyage into 70\% training, 15\% validation, and 15\% test splits, resulting in approximately 13.1 million training sequences, 2.9 million validation sequences, and 2.9 million test sequences.
-Table~\ref{tab:dataset} summarizes the dataset statistics.
-
-\begin{table}[t]
-    \centering
-    \caption{Dataset Statistics}
-    \label{tab:dataset}
-    \renewcommand{\arraystretch}{1.08}
-    \begin{tabular*}{\columnwidth}{@{\extracolsep{\fill}}lr@{}}
-        \toprule
-        \textbf{Statistic} & \textbf{Value} \\
-        \midrule
-        Total AIS records & 35,866,596 \\
-        Unique vessels (MMSI) & 3,940 \\
-        Extracted voyages & 9,087 \\
-        Voyage duration range & 6--720 hours \\
-        \midrule
-        Training sequences & 13,126,450 \\
-        Validation sequences & 2,876,287 \\
-        Test sequences & 2,859,888 \\
-        \midrule
-        Navigation features & 6 \\
-        Weather features & 5 \\
-        Total input dimensions & 11 \\
-        Sequence length & 48 \\
-        \bottomrule
-    \end{tabular*}
-\end{table}
-
-
-
-
-\subsection{Experimental Protocol}
-
-To ensure a fair comparison, all models are evaluated under identical conditions:
-
-\begin{itemize}
-    \item \textbf{Data}: Same train/val/test splits (70/15/15\% by voyage), same 11-dimensional feature set, and same min-max normalization with log-standardized targets.
-    \item \textbf{Loss}: Huber loss ($\delta = 1.0$) for all models.
-    \item \textbf{Optimizer}: Adam ($\text{lr} = 10^{-3}$) for all neural models; the Informer uses $\text{lr} = 4 \times 10^{-4}$ with ReduceLROnPlateau scheduling per its original training recipe.
-    \item \textbf{Early stopping}: Patience of 3 epochs on validation loss for all neural models.
-    \item \textbf{Batch size}: 4,096 for all models.
-    \item \textbf{Hardware}: Single NVIDIA RTX PRO 6000 GPU (96\,GB VRAM). XGBoost uses GPU-accelerated histogram building.
-\end{itemize}
-
-Data loading employs memory-mapped arrays (NumPy memmap) to handle the 13M+ training sequences without exceeding system memory, with 64 data loader workers and pinned GPU memory transfers.
-
-
-\subsection{Evaluation Metrics}
-
-We report the following metrics on the test set:
-
-\begin{itemize}
-    \item \textbf{MAE} (Mean Absolute Error, in hours): $\frac{1}{N}\sum_{i}|\hat{y}_i - y_i|$.
-    \item \textbf{RMSE} (Root Mean Squared Error, in hours): $\sqrt{\frac{1}{N}\sum_{i}(\hat{y}_i - y_i)^2}$.
-    \item \textbf{MAPE} (Mean Absolute Percentage Error, \%): computed only on samples where $y_i > 24$ hours, to avoid division-by-zero artifacts on near-arrival predictions.
-    \item \textbf{MedAE} (Median Absolute Error, in hours): the median of $|\hat{y}_i - y_i|$, which is robust to outliers and reflects typical prediction quality.
-    \item $\boldsymbol{R^2}$ (Coefficient of Determination): $1 - \sum_i(\hat{y}_i - y_i)^2 / \sum_i(y_i - \bar{y})^2$.
-    \item \textbf{Within-$\tau$} accuracy: the fraction of predictions with $|\hat{y}_i - y_i| \leq \tau$ hours, reported for $\tau \in \{6, 12, 24\}$.
-\end{itemize}
-
-For uncertainty quantification (Section~\ref{sec:uq}), we additionally report:
-\begin{itemize}
-    \item \textbf{PICP} (Prediction Interval Coverage Probability): the fraction of test samples whose true value falls within the predicted interval.
-    \item \textbf{MPIW} (Mean Prediction Interval Width, in hours): the average width of prediction intervals, measuring sharpness.
-    \item \textbf{DSCE} (Duration-Stratified Calibration Error): the maximum absolute deviation between the stratum-level PICP and the target coverage across voyage duration bins, measuring worst-case miscalibration.
-\end{itemize}
+We report MAE, RMSE, MAPE, MedAE, $R^2$, and Within-$\tau$ accuracy for $\tau \in \{6,12,24\}$. MAPE is computed only for samples with $y_i > 24$ hours to avoid near-arrival artifacts. For uncertainty analysis (Section~\ref{sec:uq}), we additionally report PICP, MPIW, and DSCE.
 
 
 \subsection{Main Results}
 
-Table~\ref{tab:main_results} presents the comparison of all ten methods on the test set.
-Fig.~\ref{fig:baseline_comparison} provides a visual comparison.
+Table~\ref{tab:main_results} reports the test-set results for all methods.
 
 \begin{table}[t]
     \centering
@@ -537,62 +688,13 @@ Fig.~\ref{fig:baseline_comparison} provides a visual comparison.
     \end{tabular}
 \end{table}
 
-\begin{figure}[t]
-    \centering
-    \includegraphics[width=\columnwidth]{baseline_comparison.pdf}
-    \caption{MAE comparison across all methods, grouped by architectural family. Ridge Regression (58.30\,h) is omitted for visual clarity. The dashed line indicates the best single-model result (MSTGN-KD, 15.13\,h). MSTGN-KD surpasses XGBoost as a single model; MSTGN-Ens7 (14.95\,h) achieves the best overall accuracy.}
-    \label{fig:baseline_comparison}
-\end{figure}
+MSTGN-Ens7 achieves the best overall accuracy (MAE 14.95\,h), while MSTGN-KD achieves the best single-model performance (15.13\,h), narrowly surpassing XGBoost (15.14\,h). Knowledge distillation transfers 89\% of the ensemble gain ($15.28 \to 15.13$\,h) into a single 273K-parameter model. The gain is not solely due to distillation: MSTGN-MLP2 already improves over MSTGN-MLP (15.28 vs.\ 15.40\,h), indicating that enriched statistical features close most of the gap before compression.
 
-\subsubsection{Key Findings}
+The broader ranking is equally informative. Statistical-feature models outperform sequence-heavy alternatives: StatMLP (15.41\,h) matches MSTGN-MLP within 0.01\,h, whereas GRU-based models remain about 0.6\,h worse. Attention-based models also provide little benefit in this setting: Transformer performs worst among the neural baselines (18.12\,h), and both Informer (16.20\,h) and Conv-Transformer (16.60\,h) trail the much smaller MLP (15.73\,h). These results suggest that, for single-step ETA regression, compact feature summaries are more effective than complex temporal encoders.
 
-\paragraph{MSTGN-KD surpasses XGBoost as a single model}
-Our enriched MSTGN-MLP2, trained with ensemble knowledge distillation ($\alpha = 0.6$), achieves MAE = 15.13\,h, surpassing XGBoost (15.14\,h) with a \textit{single model} at inference.
-The teacher ensemble (MSTGN-Ens7, top-7 of 15 seeds) achieves 14.95\,h, the best overall result.
-Crucially, knowledge distillation transfers 89\% of the ensemble's improvement ($15.28 \to 15.13$\,h) into one 273K-parameter model, eliminating the need for multi-model inference.
-The base MSTGN-MLP2 (15.28\,h) already surpasses MSTGN-MLP (15.40\,h) through enriched features, and the knowledge distillation step closes the remaining gap to XGBoost.
+Graph structure yields modest but consistent gains. Adding GCN cell embeddings slightly improves both the statistical branch (MSTGN-MLP 15.40\,h vs.\ StatMLP 15.41\,h) and the GRU branch (MSTGN-Late 15.56\,h vs.\ GRU 16.03\,h). The magnitude of the gain is small, which suggests that latitude and longitude already encode most positional information, while the graph provides residual route-level context.
 
-\paragraph{Statistical features dominate over temporal modeling}
-The StatMLP ablation (15.41\,h), which uses statistical features without graph information, matches MSTGN-MLP within 0.01\,h.
-Meanwhile, all GRU-based models (GRU: 16.03, MSTGN-GRU: 16.06\,h) underperform the statistical baselines by ${\sim}0.6$\,h.
-This reveals that compact statistical summaries (last-step, mean, std, delta) capture nearly all information that sequence models attempt to learn, while avoiding temporal noise that degrades GRU performance.
-
-\paragraph{Attention-based models do not justify their complexity}
-The Vanilla Transformer (18.12\,h MAE, 1.6M params) performs worst among the neural models.
-The Informer (16.20\,h, 11.3M params) and Conv-Transformer (16.60\,h, 1.2M params) lag behind the simpler MLP (15.73\,h, 270K params).
-These architectures, designed for long-horizon multi-step forecasting, appear unnecessary for the single-step prediction task considered here ($L_{\text{pred}} = 1$).
-
-\paragraph{Graph structure provides marginal but consistent improvement}
-Across all matched comparisons, adding GCN cell embeddings yields small but positive gains: MSTGN-MLP (15.40\,h) vs.\ StatMLP (15.41\,h), and MSTGN-LateFusion (15.56\,h) vs.\ GRU (16.03\,h).
-The limited magnitude of improvement suggests that latitude and longitude features already encode most positional information, leaving the graph structure to capture only residual route-level context.
-
-\subsubsection{Prediction Quality Analysis}
-
-Fig.~\ref{fig:analysis} provides a detailed characterization of the best single model (MSTGN-KD, $\alpha{=}0.6$).
-Panel~(a) shows strong agreement between predicted and actual remaining time across the full range, with the densest concentration along the diagonal for voyages under 350\,h.
-Panel~(b) reveals that MAE increases monotonically with true remaining time: predictions within the first day achieve MAE~$< 3$\,h, while voyages beyond 14 days (336\,h) exhibit MAE~$> 25$\,h, consistent with the compounding uncertainty of long-horizon prediction.
-Panel~(c) shows the error distribution is approximately symmetric with a slight negative bias (mean error $= -2.56$\,h, median $= +1.18$\,h), indicating no systematic over- or underestimation for the majority of predictions.
-Panel~(d) presents the cumulative accuracy curve: 50\% of predictions fall within 8.3\,h of the true value, 90\% within 35.2\,h, and 95\% within 51.4\,h.
-
-Table~\ref{tab:extended_metrics} supplements the main results with additional metrics for the key models.
-MSTGN-KD achieves MedAE~$=$~8.31\,h (indicating that the typical prediction is within $\pm$8\,h), $R^2 = 0.958$, and 41.1\% of predictions within $\pm$6\,h of the true value.
-The ensemble further improves MedAE to 8.09\,h and within-24h accuracy to 82.1\%.
-
-\begin{table}[t]
-    \centering
-    \caption{Extended evaluation metrics for key models. Within-$\tau$: fraction of predictions with $|\text{error}| \leq \tau$\,h.}
-    \label{tab:extended_metrics}
-    \footnotesize
-    \begin{tabular}{lccccc}
-        \toprule
-        \textbf{Model} & \textbf{MedAE} & $\boldsymbol{R^2}$ & \textbf{$\pm$6\,h} & \textbf{$\pm$12\,h} & \textbf{$\pm$24\,h} \\
-        \midrule
-        MSTGN-MLP2   & 8.13 & 0.957 & 41.7\% & 61.6\% & 81.5\% \\
-        MSTGN-KD     & 8.31 & 0.958 & 41.1\% & 61.0\% & 81.6\% \\
-        MSTGN-Ens7   & \textbf{8.09} & \textbf{0.959} & \textbf{41.5\%} & \textbf{61.5\%} & \textbf{82.1\%} \\
-        \bottomrule
-    \end{tabular}
-\end{table}
+Fig.~\ref{fig:analysis} examines the best single model, MSTGN-KD ($\alpha{=}0.6$). Predictions align closely with ground truth across most of the range, but MAE rises steadily with remaining voyage time: it is below 3\,h within the first day and exceeds 25\,h beyond 14 days. The error distribution is approximately symmetric with a slight negative bias (mean $=-2.56$\,h, median $=+1.18$\,h). The cumulative accuracy curve shows that 50\% of predictions fall within 8.3\,h, 90\% within 35.2\,h, and 95\% within 51.4\,h. Beyond MAE, MSTGN-KD achieves MedAE $= 8.31$\,h, $R^2 = 0.958$, and 41.1\% within $\pm6$\,h; the ensemble further improves MedAE to 8.09\,h and Within-24h accuracy to 82.1\%.
 
 \begin{figure*}[t]
     \centering
@@ -600,17 +702,12 @@ The ensemble further improves MedAE to 8.09\,h and within-24h accuracy to 82.1\%
     \caption{Prediction quality analysis of the best single model (MSTGN-KD, $\alpha{=}0.6$, MAE~$=$~15.13\,h) on the test set (2.86M samples). (a)~Predicted vs.\ actual remaining time (hexbin density); (b)~MAE stratified by true remaining voyage time; (c)~error distribution histogram; (d)~cumulative fraction of predictions within a given absolute error threshold.}
     \label{fig:analysis}
 \end{figure*}
+Viewed in the context of recent maritime ETA studies, the role of Table~\ref{tab:lit_comparison} is not to claim a direct numerical ranking, since route networks, target definitions, prediction horizons, and evaluation protocols differ substantially across papers. It is more useful as a positioning table. Most existing studies focus on port areas, inland waterways, pilotage zones, or near-arrival prediction, and many compare only a small set of models within a narrow methodological scope. Even the cross-Pacific study of Lloret-Batlle et al.~\cite{lloretbatlle2025} reports performance in a near-port regime, with vessels already within about 1{,}500~NM of destination. By contrast, our setting is full-voyage remaining-time prediction, including much earlier stages of the voyage when a vessel may still be more than 5{,}000~NM from port.
 
-
-\subsection{Comparison with Existing Maritime ETA Methods}
-
-Table~\ref{tab:lit_comparison} situates our work among recent vessel ETA prediction studies.
-Direct numerical comparison across studies is infeasible because each uses a different dataset, route network, prediction horizon, and evaluation protocol.
-We therefore present a qualitative positioning that highlights the methodological scope and scale of each study.
 
 \begin{table*}[t]
     \centering
-    \caption{Comparison with existing maritime ETA prediction studies. ``Dist.''~denotes the approximate sailing distance covered by the dataset. Metrics are as reported by the original authors and are \textbf{not directly comparable} due to differences in route type, prediction granularity, and evaluation protocol.}
+    \caption{Recent maritime ETA prediction studies. ``Dist.''~denotes the approximate sailing distance covered by the dataset. Metrics are as reported by the original authors and are \textbf{not directly comparable} due to differences in route type, prediction granularity, and evaluation protocol.}
     \label{tab:lit_comparison}
     \footnotesize
     \setlength{\tabcolsep}{3pt}
@@ -635,34 +732,19 @@ We therefore present a qualitative positioning that highlights the methodologica
     \end{tabular}
 \end{table*}
 
-Several key differences distinguish this work from the existing literature:
+This difference in scope matters when interpreting the error level. A larger absolute MAE is expected when prediction begins much earlier in the voyage, before route-specific uncertainty has largely resolved. At the same time, our benchmark is broader than most prior work: we compare 16 configurations from six model families under a single protocol with shared splits, features, loss, optimizer, and early-stopping criteria, so the gaps in Table~\ref{tab:main_results} are primarily attributable to model design rather than experimental mismatch. Prior maritime studies have explored ensemble-based systems~\cite{saberHighaccuracyPredictionVessels2025,chuVesselArrivalTime2025}, but they typically retain multi-model inference at test time. Here, the practical point is that MSTGN-KD preserves most of the ensemble gain (15.13 vs.\ 14.95\,h) in a single deployable model.
 
-\textbf{(1)~Scale of benchmark.}
-Most prior studies compare 3--5 models within a single architectural family.
-We evaluate 16 configurations spanning six families (feedforward, recurrent, convolutional, attention, tree-based, and graph-based) under strictly identical conditions, providing---to our knowledge---the most comprehensive controlled benchmark for maritime ETA prediction.
 
-\textbf{(2)~Full-voyage prediction scope.}
-The majority of existing studies focus on port-area or last-mile ETA prediction, where the vessel is already near its destination.
-For example, Lloret-Batlle et al.~\cite{lloretbatlle2025} report MAE~$\approx$~4\,h when the vessel is within 1,500~NM of port on cross-Pacific routes---a setting where substantial uncertainty has already been resolved.
-In contrast, our model predicts remaining sailing time \textit{at any point during the voyage}, including early-voyage predictions where the vessel may still be 5,000+~NM from its destination, which is inherently more challenging and results in higher absolute error.
-
-\textbf{(3)~Controlled experimental conditions.}
-Prior studies often differ in their choice of loss function, optimizer, data split, feature set, and normalization, making it difficult to isolate the effect of model architecture.
-Our evaluation uses a single unified protocol (identical splits, features, loss, optimizer, and early-stopping criteria) to ensure that all performance differences arise solely from architectural choices.
-
-\textbf{(4)~Knowledge distillation for deployment.}
-While ensemble methods have been explored in maritime ETA~\cite{saberHighaccuracyPredictionVessels2025,chuVesselArrivalTime2025}, these approaches require running multiple models at inference time.
-Our ensemble knowledge distillation framework compresses a 15-seed teacher ensemble into a single student model that achieves comparable accuracy (15.13 vs.\ 14.95\,h), providing a practical deployment advantage.
 
 
 \subsection{Ablation Studies}
 \label{sec:ablations}
 
+Ablation studies are conducted to isolate the contributions of the input feature set, the spatial design of MSTGN, and the distillation procedure used to compress the ensemble. Taken together, these experiments clarify how meteorological variables, graph construction and fusion strategy, and ensemble-to-student transfer affect overall prediction accuracy.
+
 \subsubsection{Effect of Weather Features}
 
-To quantify the contribution of meteorological features, we train the Informer model with identical hyperparameters using only the six navigation features ($d = 6$) versus the full 11-dimensional input ($d = 11$).
-As shown in Table~\ref{tab:ablation_weather}, incorporating weather features reduces MAE from 17.43 hours to 16.20 hours, a 7.1\% relative improvement.
-This confirms that en-route weather conditions provide complementary information beyond what navigation features alone capture.
+To quantify the contribution of meteorological features, we train the Informer model with identical hyperparameters using only the six navigation features ($d = 6$) versus the full 11-dimensional input ($d = 11$). As shown in Table~\ref{tab:ablation_weather}, incorporating weather features reduces MAE from 17.43 to 16.20\,h, a 7.1\% relative improvement. This indicates that en-route weather conditions provide complementary information beyond what navigation features alone capture.
 
 \begin{table}[t]
     \centering
@@ -680,20 +762,16 @@ This confirms that en-route weather conditions provide complementary information
     \end{tabular}
 \end{table}
 
-\subsubsection{Effect of Asymmetric Loss (Negative Result)}
-\label{sec:ablation_loss}
+\subsubsection{Effect of Asymmetric Loss}
 
-In maritime logistics, underestimating the arrival time is typically more costly than overestimating it, as it can lead to missed berth windows, idle cranes, and cascading schedule disruptions.
-Motivated by this asymmetry, we investigate an \textit{Asymmetric Huber Loss} that penalizes underestimation by a factor of $\alpha$ and optionally upweights long-haul voyages by a factor proportional to the target value:
+To examine whether explicitly penalizing underestimation improves operationally relevant performance, an \textit{Asymmetric Huber Loss} is introduced in which underestimation is weighted by a factor of $\alpha$ and long-haul voyages can be further upweighted through the target value:
 \begin{equation}
     \mathcal{L} = \frac{1}{N} \sum_{i=1}^{N} w_{\text{asym}}^{(i)} \cdot w_{\text{target}}^{(i)} \cdot \mathcal{H}_\delta(e_i)
     \label{eq:loss}
 \end{equation}
 where $w_{\text{asym}} = \alpha$ if $e_i < 0$ (underestimation), else $1$; and $w_{\text{target}} = 1 + \beta \cdot \text{ReLU}(y_i)$.
 
-We test two configurations: (A)~$\alpha{=}1.5, \beta{=}0.3$ and (B)~$\alpha{=}1.2, \beta{=}0$.
-As shown in Table~\ref{tab:ablation_loss}, both configurations significantly degrade overall accuracy.
-Configuration A increases MAE by 13.8\% (16.20 $\to$ 18.43\,h), while Configuration B increases MAE by 17.6\% (16.20 $\to$ 19.05\,h).
+Two configurations are considered: (A)~$\alpha{=}1.5, \beta{=}0.3$ and (B)~$\alpha{=}1.2, \beta{=}0$. Both degrade accuracy substantially (Table~\ref{tab:ablation_loss}): configuration A increases MAE by 13.8\% (16.20 $\to$ 18.43\,h), and configuration B increases it by 17.6\% (16.20 $\to$ 19.05\,h).
 
 \begin{table}[t]
     \centering
@@ -710,16 +788,11 @@ Configuration A increases MAE by 13.8\% (16.20 $\to$ 18.43\,h), while Configurat
     \end{tabular}
 \end{table}
 
-This negative result suggests that naive asymmetric loss application may cause the model to systematically overestimate, degrading calibration.
-The asymmetric penalty distorts the loss landscape in ways that the optimizer cannot easily compensate for, particularly when combined with log-standardized targets and early stopping based on symmetric validation loss.
-We report this finding to caution practitioners against applying asymmetric losses without careful calibration.
+Under the present training setup, the asymmetric objective appears to push the model toward overestimation and poorer calibration rather than better operational behavior. We therefore treat asymmetric loss as a cautionary result, not a default design choice.
 
+\subsubsection{Spatial Structure and Model Design}
 
-\subsubsection{Ablation: Graph and Temporal Components}
-\label{sec:graph_ablation}
-
-To disentangle the contributions of spatial graph structure, temporal sequence modeling, and statistical features, we conduct a component ablation study.
-Table~\ref{tab:ablation_graph} summarizes the results for all MSTGN variants.
+To disentangle the contributions of temporal sequence modeling, graph structure, and the statistical feature branch, Table~\ref{tab:ablation_graph} compares the main MSTGN components directly.
 
 \begin{table}[t]
     \centering
@@ -740,19 +813,9 @@ Table~\ref{tab:ablation_graph} summarizes the results for all MSTGN variants.
     {\footnotesize $^\dagger$Cell embedding concatenated to every timestep.}
 \end{table}
 
-Three conclusions emerge.
-\textbf{(1)~Statistical features outperform temporal modeling}: StatMLP (15.41\,h) outperforms GRU (16.03\,h) by 0.62\,h despite using a 44-dim vector instead of $48{\times}11 = 528$ values, confirming that compact statistical summaries capture nearly all predictive signal available in the raw sequence.
-\textbf{(2)~GCN provides marginal but consistent gains}: Adding graph embeddings improves StatMLP by 0.01\,h (MAE) and 0.51\,h (RMSE), and improves GRU by 0.47\,h in the late-fusion variant.
-The larger RMSE reduction suggests the spatial context primarily helps on high-error outliers.
-\textbf{(3)~Early fusion of graph features hurts}: MSTGN-GRU, which concatenates cell embeddings to every timestep, performs \textit{worse} than the plain GRU (16.06 vs.\ 16.03\,h), indicating that injecting constant spatial features into the recurrent input stream dilutes the temporal signal.
+The clearest pattern is that compact statistical summaries carry most of the predictive signal. StatMLP (15.41\,h) outperforms GRU (16.03\,h) while using a 44-dimensional vector instead of the raw $48{\times}11$ sequence. GCN embeddings still help, but only modestly: MSTGN-MLP improves StatMLP by 0.01\,h MAE and 0.51\,h RMSE, and MSTGN-Late improves GRU by 0.47\,h MAE. Early fusion moves in the opposite direction, with MSTGN-GRU slightly worse than the plain GRU (16.06 vs.\ 16.03\,h), which suggests that repeating static cell embeddings at every timestep weakens rather than helps the recurrent encoder.
 
-
-\subsubsection{Ablation: Grid Resolution}
-\label{sec:grid_ablation}
-
-To assess sensitivity to the $2^\circ{\times}2^\circ$ grid resolution, we train MSTGN-MLP2 (no KD) with three different cell sizes: 1°, 2°, and 4°.
-For each resolution, we rebuild the route graph (yielding different node counts and adjacency matrices) and recompute cell ID assignments for all training and test samples.
-Table~\ref{tab:ablation_grid} reports test MAE and RMSE.
+To assess sensitivity to the route-graph resolution, MSTGN-MLP2 (without KD) is trained with three cell sizes: $1^\circ{\times}1^\circ$, $2^\circ{\times}2^\circ$, and $4^\circ{\times}4^\circ$. For each resolution, the route graph is rebuilt and cell assignments are recomputed for all training and test samples. Table~\ref{tab:ablation_grid} reports the resulting comparison.
 
 \begin{table}[t]
     \centering
@@ -769,21 +832,9 @@ Table~\ref{tab:ablation_grid} reports test MAE and RMSE.
     \end{tabular}
 \end{table}
 
-The $2^\circ{\times}2^\circ$ resolution achieves the best MAE (15.28\,h) and MAPE (9.33\%), confirming our empirical choice.
-At $1^\circ$ resolution, the graph contains $3{\times}$ more nodes (4,665 vs.\ 1,541) and yields the lowest RMSE (26.24\,h), suggesting that finer spatial granularity helps reduce extreme-error outliers.
-However, the sparser graph (many cells fail the minimum-50-count threshold) leads to higher MAE (+0.23\,h) and MAPE (+0.57\,pp), indicating that insufficient per-cell training data degrades average prediction quality.
-At $4^\circ$ resolution, each node aggregates $\sim\!440$\,km of ocean, conflating topologically diverse corridors into a single embedding; all three metrics are worst among the tested resolutions.
-The $2^\circ$ grid thus balances spatial detail against data sufficiency for learning meaningful cell embeddings.
+The $2^\circ{\times}2^\circ$ grid gives the best MAE (15.28\,h) and MAPE (9.33\%), which supports our default choice. Moving to $1^\circ$ expands the graph from 1,541 to 4,665 nodes and lowers RMSE to 26.24\,h, but the sparser graph raises MAE by 0.23\,h and MAPE by 0.57\,pp. Moving to $4^\circ$ merges distinct corridors into the same node embedding and performs worst overall. In other words, $2^\circ$ gives the best balance between spatial detail and data sufficiency.
 
-
-\subsubsection{Ablation: Graph Embeddings as XGBoost Features}
-\label{sec:gcn_xgb_ablation}
-
-A key reviewer question is whether MSTGN-MLP2's advantage over XGBoost stems from the \textit{graph information} itself or from the \textit{neural fusion head} (a deep MLP trained end-to-end with backpropagation).
-To isolate these contributions, we conduct the following experiment:
-we extract the learned GCN cell embeddings from the trained MSTGN-MLP2 checkpoint, then train a new XGBoost model using the same 81-dimensional statistical feature set plus the 96-dimensional GCN context features (current cell, origin cell, route mean embedding), yielding a 177-dimensional feature vector.
-
-Table~\ref{tab:ablation_gcn_xgb} compares four configurations.
+To isolate the contribution of graph information from that of the neural fusion head, Table~\ref{tab:ablation_gcn_xgb} compares XGBoost and MSTGN variants on the richer 81-dimensional statistical feature set, with and without the 96-dimensional GCN context features.
 
 \begin{table}[t]
     \centering
@@ -804,21 +855,12 @@ Table~\ref{tab:ablation_gcn_xgb} compares four configurations.
     \end{tabular}
 \end{table}
 
-The results reveal three key insights.
-\textbf{(1)~Richer statistical features are the primary driver.}
-Expanding the feature set from 44 to 81 dimensions improves XGBoost from 15.14 to 14.97\,h ($-$0.17\,h), confirming that the speed, position, and course aggregations introduced in our pipeline are highly informative.
-\textbf{(2)~GCN embeddings do not help tree models.}
-Appending 96-dim graph context to XGBoost slightly \emph{hurts} MAE (+0.05\,h), indicating that the spatial information captured by the GCN is redundant with the statistical features when consumed by a gradient-boosted ensemble.
-\textbf{(3)~The neural head trades MAE for RMSE, and KD closes the gap.}
-MSTGN-MLP2 (no KD) has higher MAE than XGBoost (15.28 vs.\ 14.97\,h) because the shallow MLP head is a weaker function approximator for tabular data.
-However, knowledge distillation from the 7-model ensemble reduces MSTGN-MLP2's MAE to 15.13\,h ($-$0.15\,h) and produces the soft-target signal that enables the final ensemble (14.95\,h) to surpass XGBoost.
-These findings affirm that MSTGN-MLP2 is best understood as a \emph{graph-augmented feature fusion framework} whose primary value lies in (a)~the engineered statistical features and (b)~ensemble diversity, rather than in superior single-model capacity over tree methods.
-
+The main driver is still the statistical feature set. Expanding XGBoost from 44 to 81 dimensions improves MAE from 15.14 to 14.97\,h, while adding GCN context to XGBoost slightly hurts performance (15.02\,h), which suggests that the graph signal is largely redundant for tree models. MSTGN-MLP2 remains worse than 81-d XGBoost before distillation (15.28 vs.\ 14.97\,h), and KD closes much of that gap (15.13\,h). Taken together, these results suggest that MSTGN is best understood as a graph-augmented feature-fusion framework: the gains come primarily from stronger statistical features plus ensemble-based refinement, not from a stronger standalone tabular head.
 
 \subsubsection{Knowledge Distillation Analysis}
 \label{sec:kd_ablation}
 
-Table~\ref{tab:kd_ablation} shows the effect of the distillation mixing coefficient $\alpha$ on MSTGN-MLP2 performance when distilling from the top-7 ensemble.
+To assess how much of the ensemble gain can be retained in a deployable student model, Table~\ref{tab:kd_ablation} reports the effect of the mixing coefficient $\alpha$ when distilling MSTGN-MLP2 from the top-7 ensemble.
 
 \begin{table}[t]
     \centering
@@ -841,20 +883,12 @@ Table~\ref{tab:kd_ablation} shows the effect of the distillation mixing coeffici
     \end{tabular}
 \end{table}
 
-The optimal $\alpha = 0.6$ gives slightly more weight to ensemble soft targets than hard labels.
-At lower $\alpha$ (0.3), the distillation effect is minimal.
-At higher $\alpha$ (0.7), the model relies too heavily on the teacher's predictions and begins to lose the regularization benefit of ground-truth labels.
-Notably, self-distillation from a single model (using only the best MSTGN-MLP2 as teacher) yields 15.86\,h---\textit{worse} than the baseline---confirming that the diversity of the multi-seed ensemble is essential for effective KD.
-Similarly, iterative distillation (using the KD-trained model as teacher for a second round) degrades to 15.50\,h, further demonstrating that single-teacher soft targets lack the diversity needed to improve upon ensemble KD.
-Longer training (25 epochs, patience 6) exactly reproduces the standard result (15.13\,h), indicating the gain is not training-length-dependent.
-These results demonstrate that ensemble KD provides a principled way to compress ensemble knowledge into a single deployable model that surpasses XGBoost.
+The best performance is obtained at $\alpha = 0.6$, indicating that the student benefits from placing slightly more weight on the ensemble target than on the hard label. When $\alpha = 0.3$, the distillation effect remains limited; when $\alpha = 0.7$, the student relies too heavily on the teacher and loses part of the regularization benefit provided by the ground-truth target. Self-distillation from a single model (15.86\,h) and iterative KD (15.50\,h) both perform worse than ensemble KD, which suggests that diversity across the teacher ensemble is the key ingredient. Longer training reproduces the same 15.13\,h result, so the gain cannot be attributed simply to additional optimization.
 
 \subsection{Large Deviation Analysis}
 \label{sec:large_dev}
 
-While overall MAE captures mean performance, practical deployment requires understanding \textit{tail behavior}---the frequency and severity of large prediction errors.
-We define a ``large deviation'' as $|\hat{y} - y| > 100$\,h (approximately 4 days), corresponding roughly to the 99th percentile of absolute error.
-Table~\ref{tab:large_dev_profile} profiles these deviations across voyage duration bins.
+Average MAE does not fully describe the rare but operationally costly failures that matter in deployment. A ``large deviation'' is therefore defined as $|\hat{y} - y| > 100$\,h (approximately 4 days), which corresponds roughly to the 99th percentile of absolute error. Table~\ref{tab:large_dev_profile} reports the incidence of such deviations across voyage-duration bins.
 
 \begin{table}[t]
     \centering
@@ -876,24 +910,20 @@ Table~\ref{tab:large_dev_profile} profiles these deviations across voyage durati
     \end{tabular}
 \end{table}
 
-Three structural factors explain the concentration of large deviations in ultra-long voyages ($\geq 504$\,h, $< 1\%$ of data):
+Large deviations are concentrated almost entirely in ultra-long voyages ($\geq 504$\,h), although this regime accounts for less than 1\% of the test set. The rate remains below 0.3\% for voyages shorter than 168\,h, rises to 3.27\% in the $[336, 504)$\,h bin, and reaches 36.24\% in the $[504, 720)$\,h bin. Tail risk is therefore driven primarily by the longest voyages rather than by uniform degradation across all durations.
+
+Several factors help explain this pattern.
 
 \textbf{(1)~Log-space compression.}
-Since training targets are $\tilde{y} = (\ln(1+y) - \mu) / \sigma$, equal errors in log-space correspond to exponentially different errors in hours-space.
-A 0.1 log-space error at $y_{\text{true}} = 100$\,h translates to ${\sim}12$\,h, but at $y_{\text{true}} = 500$\,h it translates to ${\sim}67$\,h.
+Because training targets are defined as $\tilde{y} = (\ln(1+y) - \mu) / \sigma$, a fixed error in log space produces a much larger error in hours at long horizons. A 0.1 log-space error corresponds to only ${\sim}12$\,h at $y_{\text{true}} = 100$\,h but grows to ${\sim}67$\,h at $y_{\text{true}} = 500$\,h.
 
 \textbf{(2)~Regression to the mean.}
-Underrepresented long-duration samples exert minimal gradient influence, so the model's predictions regress toward the population mean.
-The max prediction is 590\,h versus a true max of 674\,h, confirming a prediction ceiling.
-96.4\% of large deviations are \textit{underestimates}.
+Ultra-long voyages are rare during training, so their contribution to the loss is limited and predictions are pulled toward the population mean. This bias is visible in the prediction ceiling: the maximum predicted duration is 590\,h, compared with a true maximum of 674\,h, and 96.4\% of large deviations are \textit{underestimates}.
 
 \textbf{(3)~Feature saturation.}
-For voyages $> 500$\,h, the discriminative features (distance-to-destination, bearing difference) have saturated---all such voyages start far from port---leaving insufficient signal to distinguish a 504\,h voyage from a 670\,h voyage.
+For voyages longer than 500\,h, variables such as distance to destination and bearing difference become much less discriminative because all such samples begin far from port, leaving limited signal to distinguish a 504\,h voyage from a 670\,h voyage.
 
-\subsubsection{Remediation Strategies}
-\label{sec:remediation}
-
-We evaluate three principled remediation approaches, summarized in Table~\ref{tab:remediation}.
+Given this error profile, Table~\ref{tab:remediation} evaluates whether the tail can be improved without changing the base architecture. The three interventions considered are sample reweighting during training, a dual-space objective, and post-hoc calibration.
 
 \begin{table}[t]
     \centering
@@ -917,26 +947,18 @@ We evaluate three principled remediation approaches, summarized in Table~\ref{ta
     \end{tabular}
 \end{table}
 
-\textbf{Sample reweighting} up-weights underrepresented duration bins during training.
-Inverse-density weighting assigns the $[504, 720)$\,h bin a weight of $5.0\times$, achieving the best single-strategy large deviation rate (1.237\%) but at a 0.41\,h MAE cost.
-LDS~\cite{yang2021lds} uses kernel-smoothed density estimation, giving weights of $5.9\times$ for the tail bin while maintaining smoother gradients.
-LDS offers the best trade-off: only 0.04\,h MAE increase, 0.16\,h RMSE \textit{improvement}, and 2.2\% relative large-deviation reduction.
+Sample reweighting increases the influence of underrepresented duration bins. Inverse-density weighting assigns the $[504, 720)$\,h bin a weight of $5.0\times$ and achieves the lowest large-deviation rate among the single training-time strategies (1.237\%), but at a 0.41\,h MAE cost. LDS~\cite{yang2021lds} replaces raw bin counts with a kernel-smoothed density estimate, yielding a tail weight of $5.9\times$ and smoother gradients. It provides the best balance among the training-time strategies: MAE increases by only 0.04\,h, RMSE improves by 0.16\,h, and the large-deviation rate falls by 2.2\% relative.
 
-\textbf{Dual-space loss} adds an hours-space MAE term:
-$\mathcal{L} = (1{-}\beta) \cdot \text{MSE}_{\text{log}} + \beta \cdot \text{MAE}_{\text{hours}} / 100$.
-With $\beta = 0.3$, this reduces the $[504, 720)$\,h bin rate from 36.2\% to 32.0\%, but increases overall MAE.
+A dual-space loss augments the log-space objective with an hours-space MAE term, $\mathcal{L} = (1{-}\beta) \cdot \text{MSE}_{\text{log}} + \beta \cdot \text{MAE}_{\text{hours}} / 100$. With $\beta = 0.3$, the $[504, 720)$\,h bin rate falls from 36.2\% to 32.0\%, but the improvement in the far tail comes with a higher overall MAE.
 
-\textbf{Post-hoc calibration} fits isotonic regression on a held-out calibration set.
-Combined with LDS training, this two-stage approach achieves the lowest large-deviation rate (1.226\%, a 5.0\% relative reduction) but at 0.43\,h MAE cost.
+Post-hoc isotonic calibration is fitted on a held-out calibration set. When combined with LDS training, this two-stage approach achieves the lowest overall large-deviation rate (1.226\%, a 5.0\% relative reduction), again at the cost of higher MAE.
 
-The consistent finding across all strategies is that reducing tail errors for the $< 1\%$ of ultra-long voyages requires shifting predictions upward, which necessarily degrades accuracy for the $> 99\%$ of shorter voyages.
-This MAE--reliability trade-off is a fundamental consequence of the skewed voyage duration distribution and the log-space training objective, and motivates the uncertainty quantification framework presented next.
+Across all strategies, the same trade-off remains: reducing tail errors for the $< 1\%$ of ultra-long voyages requires shifting predictions upward, which degrades average accuracy for the much larger population of shorter voyages. This MAE--reliability trade-off follows from the skewed voyage-duration distribution and the log-space training objective, and motivates the uncertainty quantification analysis that follows.
 
 \subsection{Uncertainty Quantification via Conformal Prediction}
 \label{sec:uq}
 
-Port operators require not only a point ETA estimate but also a measure of \textit{how uncertain} that estimate is, enabling dynamic buffer allocation and risk-aware berth scheduling.
-We leverage the multi-seed ensemble's prediction disagreement as an epistemic uncertainty signal and apply \textit{split conformal prediction}~\cite{vovk2005conformal,romano2019cqr} to produce calibrated prediction intervals with finite-sample coverage guarantees.
+For operational planning, a point ETA estimate is not sufficient on its own; the model must also indicate its uncertainty so that buffer times can be adjusted by voyage stage. We therefore use the multi-seed ensemble's prediction disagreement as an uncertainty signal and apply \textit{split conformal prediction}~\cite{vovk2005conformal,romano2019cqr} to construct calibrated prediction intervals with finite-sample coverage guarantees.
 
 \subsubsection{Method}
 Given the 15-model MSTGN-MLP2 ensemble, for each test sample $i$ we compute the ensemble mean $\hat{y}_i = \frac{1}{K}\sum_{k=1}^{K}\hat{y}_i^{(k)}$ as the point estimate and the ensemble standard deviation $\hat{\sigma}_i = \text{std}(\{\hat{y}_i^{(k)}\}_{k=1}^{K})$ as the uncertainty estimate.
@@ -966,25 +988,19 @@ Table~\ref{tab:conformal} reports the marginal coverage and interval width.
     \end{tabular}
 \end{table}
 
-Both methods achieve the target coverage, confirming conformal validity.
-The adaptive intervals are 8--9\% narrower than fixed-width intervals (64.3 vs.\ 69.8\,h at 90\%), demonstrating that ensemble uncertainty is a meaningful signal: the model ``knows when it doesn't know.''
-The Spearman rank correlation between $\hat{\sigma}$ and absolute error is $\rho = 0.568$ ($p < 10^{-300}$), confirming strong monotonic alignment between predicted uncertainty and actual error magnitude.
+\noindent Both methods achieve the target coverage, confirming conformal validity. The adaptive intervals are 8--9\% narrower than fixed-width intervals (64.3 vs.\ 69.8\,h at 90\%), indicating that ensemble dispersion carries useful uncertainty information. The Spearman rank correlation between $\hat{\sigma}$ and absolute error is $\rho = 0.568$ ($p < 10^{-300}$), showing strong monotonic alignment between predicted uncertainty and realized error magnitude.
 
 \subsubsection{Stratified Calibration Analysis}
 
-While marginal coverage is near-exact, calibration may degrade for specific subpopulations.
-We propose \textbf{Duration-Stratified Calibration Error (DSCE)}, defined as the maximum absolute deviation between stratum-level PICP and the target coverage across voyage duration bins:
+Although marginal coverage is close to the nominal level, calibration can vary across voyage stages. To quantify this variation, we define \textbf{Duration-Stratified Calibration Error (DSCE)} as
 \begin{equation}
     \text{DSCE} = \max_{s \in \mathcal{S}} \bigl|\text{PICP}_s - (1{-}\alpha)\bigr|,
 \end{equation}
-where $\mathcal{S}$ partitions samples by true remaining time.
-Lower DSCE indicates more uniform reliability across voyage stages.
-
-Table~\ref{tab:stratified_calib} reports 90\% adaptive interval metrics stratified by voyage duration.
+where $\mathcal{S}$ partitions samples by true remaining time. Table~\ref{tab:stratified_calib} reports 90\% adaptive interval metrics by voyage duration.
 
 \begin{table}[t]
     \centering
-    \caption{Stratified calibration of 90\% adaptive conformal intervals by voyage duration. RPIW $=$ MPIW / median\_true\_duration.}
+    \caption{Stratified calibration of 90\% adaptive conformal intervals by voyage duration.}
     \label{tab:stratified_calib}
     \footnotesize
     \begin{tabular}{lrcccr}
@@ -1002,14 +1018,11 @@ Table~\ref{tab:stratified_calib} reports 90\% adaptive interval metrics stratifi
     \end{tabular}
 \end{table}
 
-Short voyages ($< 100$\,h) are \textit{over-covered} (94.8\% vs.\ 90\% target), meaning intervals are conservative---acceptable for operational safety.
-Long voyages ($> 400$\,h) are \textit{under-covered} (85.6\%), reflecting the same long-tail difficulty identified in Section~\ref{sec:large_dev}.
-The DSCE of 4.78\,pp indicates that worst-case stratum-level miscoverage is moderate; no stratum deviates by more than 5 percentage points from the target.
+\noindent Short voyages ($< 100$\,h) are \textit{over-covered} (94.8\% vs.\ 90\%), whereas long voyages ($> 400$\,h) are \textit{under-covered} (85.6\%), consistent with the long-tail difficulty identified in Section~\ref{sec:large_dev}. The resulting DSCE is 4.78\,pp.
 
 \subsubsection{Operational Buffer Time Analysis}
 
-For port operators, the prediction interval can be translated into a \textit{buffer time}---the additional slack to add to the point ETA to achieve a desired on-time reliability.
-Table~\ref{tab:buffer} reports the empirical buffer needed for 90\% and 95\% on-time arrival, stratified by remaining voyage duration.
+For operational use, Table~\ref{tab:buffer} reports the \textit{buffer time} implied by the prediction interval, i.e., the slack added to the point ETA to achieve 90\% or 95\% on-time reliability across voyage-duration bins.
 
 \begin{table}[t]
     \centering
@@ -1029,10 +1042,9 @@ Table~\ref{tab:buffer} reports the empirical buffer needed for 90\% and 95\% on-
     \end{tabular}
 \end{table}
 
-For near-arrival predictions ($< 1$ day remaining), a buffer of just 1.5\,h suffices for 90\% reliability---directly usable for berth scheduling.
-For early-voyage predictions ($> 14$ days), the 90\% buffer grows to 67.8\,h ($\sim$3 days), reflecting the fundamental uncertainty of long-horizon maritime forecasting.
-The monotonically increasing late-arrival rate (30.4\% to 62.4\%) confirms the systematic underestimation bias in the tail identified in the large-deviation analysis.
-These duration-specific buffers enable \textit{risk-aware scheduling}: port operators can apply tighter buffers for near-arrival vessels (high confidence) and wider buffers for distant vessels (high uncertainty), optimizing berth utilization while maintaining service reliability.
+For near-arrival predictions ($< 1$ day remaining), a 1.5\,h buffer is sufficient for 90\% reliability; for early-voyage predictions ($> 14$ days), the corresponding buffer increases to 67.8\,h ($\sim$3 days). The late-arrival rate rises monotonically from 30.4\% to 62.4\%, consistent with the underestimation bias in the long tail.
+
+%==============================================================
 
 %==============================================================
 \section{Conclusion}
