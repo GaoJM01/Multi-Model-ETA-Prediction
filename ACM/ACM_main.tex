@@ -1,8 +1,6 @@
-\documentclass[conference]{IEEEtran}
-\IEEEoverridecommandlockouts
-
+\documentclass[sigconf,anonymous]{acmart}%%
 \usepackage{graphicx}
-\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{amsmath}
 \usepackage{algorithmic}
 \usepackage{textcomp}
 \usepackage{booktabs}
@@ -10,24 +8,32 @@
 \usepackage{xcolor}
 \usepackage{subcaption}
 \usepackage{array}
-\usepackage[numbers]{natbib}
-\usepackage[colorlinks=true, allcolors=blue]{hyperref}
 \usepackage{ragged2e}
 \usepackage{tikz}
-\usepackage{comment} 
+\usepackage{comment}
 \usetikzlibrary{positioning, arrows.meta, fit, backgrounds, calc, shapes.geometric}
 \newcolumntype{P}[1]{>{\RaggedRight\arraybackslash}p{#1}}
+\hypersetup{colorlinks=true, allcolors=blue}
 
-\title{Maritime Spatio-Temporal Graph Network for Vessel ETA Prediction: An Empirical Study on Trans-Pacific Routes}
+\AtBeginDocument{%
+  \providecommand\BibTeX{{%
+    Bib\TeX}}}
 
-\author{
-\IEEEauthorblockN{Anonymous}
-\IEEEauthorblockA{Anonymous Affiliation}
-}
+\setcopyright{none}
+\settopmatter{printacmref=false}
 
 \begin{document}
 
-\maketitle
+\title{Maritime Spatio-Temporal Graph Network for Vessel ETA Prediction: An Empirical Study on Trans-Pacific Routes}
+
+\author{Anonymous}
+\affiliation{%
+  \institution{Anonymous Institution}
+  \city{Anonymous City}
+  \country{Anonymous Country}}
+\email{anonymous@example.com}
+
+\renewcommand{\shortauthors}{Anonymous}
 
 \begin{abstract}
 Accurate Estimated Time of Arrival (ETA) prediction for ocean-going vessels is critical for port logistics, berth scheduling, and supply chain management.
@@ -41,6 +47,40 @@ Beyond point-prediction accuracy, we apply ensemble-based conformal prediction t
 We propose Duration-Stratified Calibration Error (DSCE), a metric for assessing interval reliability across voyage duration strata, and derive operationally actionable buffer times for port scheduling.
 These findings reveal that for single-step vessel ETA prediction, compact statistical features combined with spatial graph context, knowledge distillation, and conformal uncertainty quantification provide an effective and operationally practical approach.
 \end{abstract}
+
+% \begin{CCSXML}
+% <ccs2012>
+%  <concept>
+%   <concept_id>00000000.0000000.0000000</concept_id>
+%   <concept_desc>Do Not Use This Code, Generate the Correct Terms for Your Paper</concept_desc>
+%   <concept_significance>500</concept_significance>
+%  </concept>
+%  <concept>
+%   <concept_id>00000000.00000000.00000000</concept_id>
+%   <concept_desc>Do Not Use This Code, Generate the Correct Terms for Your Paper</concept_desc>
+%   <concept_significance>300</concept_significance>
+%  </concept>
+%  <concept>
+%   <concept_id>00000000.00000000.00000000</concept_id>
+%   <concept_desc>Do Not Use This Code, Generate the Correct Terms for Your Paper</concept_desc>
+%   <concept_significance>100</concept_significance>
+%  </concept>
+%  <concept>
+%   <concept_id>00000000.00000000.00000000</concept_id>
+%   <concept_desc>Do Not Use This Code, Generate the Correct Terms for Your Paper</concept_desc>
+%   <concept_significance>100</concept_significance>
+%  </concept>
+% </ccs2012>
+% \end{CCSXML}
+
+% \ccsdesc[500]{Do Not Use This Code~Generate the Correct Terms for Your Paper}
+% \ccsdesc[300]{Do Not Use This Code~Generate the Correct Terms for Your Paper}
+% \ccsdesc{Do Not Use This Code~Generate the Correct Terms for Your Paper}
+% \ccsdesc[100]{Do Not Use This Code~Generate the Correct Terms for Your Paper}
+
+\keywords{Do, Not, Use, This, Code, Put, the, Correct, Terms, for, Your, Paper}
+
+\maketitle
 
 \section{Introduction}
 
@@ -369,7 +409,7 @@ The overall pipeline is illustrated in Fig.~\ref{fig:architecture}. Raw AIS reco
 % === Row 2: Sequence output ===
 \node[feat, below=0.5cm of preproc, minimum width=3.2cm] (seq) {AIS Sequence ($48 \times 11$)};
 
-% Arrows: data → preproc
+% Arrows: data 鈫?preproc
 \draw[arr] (ais.south) -- ++(0,-0.15) -| (preproc.north -| preproc.west);
 \draw[arr] (wx.south) -- ++(0,-0.15) -| (preproc.north -| preproc.east);
 
@@ -1080,8 +1120,6 @@ We leave a systematic evaluation of historical statistical priors as a feature f
 %==============================================================
 % References
 %==============================================================
-
-\bibliographystyle{IEEEtran}
 
 \begin{thebibliography}{99}
 
